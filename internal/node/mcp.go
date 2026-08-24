@@ -105,12 +105,6 @@ func NewMCPServer(node *SamNode) *mcp.Server {
 		Description: "Get information about the mesh network",
 	}, node.handleGetMeshInfo)
 
-	// Add the local transport identity attestation tool.
-	mcp.AddTool(mcpServer, &mcp.Tool{
-		Name:        "get_transport_identity",
-		Description: "Sign a nonce-bound statement proving this local node key and an expected currently trusted control-plane key.",
-	}, node.handleGetTransportIdentity)
-
 	// Add the call_remote_tool tool.
 	mcp.AddTool(mcpServer, &mcp.Tool{
 		Name:        "call_remote_tool",
