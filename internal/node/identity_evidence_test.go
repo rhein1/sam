@@ -15,13 +15,12 @@
 package node
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
-	"encoding/base64"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -31,6 +30,7 @@ import (
 	"github.com/google/sam/internal/identity"
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/libp2p/go-libp2p"
+	"google.golang.org/protobuf/encoding/protojson"
 )
 
 func newIdentityEvidenceTestNode(t *testing.T, labels map[string]string) (*SamNode, ed25519.PrivateKey, time.Time) {
@@ -91,6 +91,9 @@ func TestIdentityEvidenceRequiresStrongTransport(t *testing.T) {
 	if plainRecorder.Code != http.StatusForbidden {
 		t.Fatalf("plain TCP status = %d, want %d", plainRecorder.Code, http.StatusForbidden)
 	}
+	if got := plainRecorder.Header().Get("Content-Type"); got != "text/plain; charset=utf-8" {
+		t.Fatalf("plain TCP content type = %q, want text/plain", got)
+	}
 
 	socketRecorder := httptest.NewRecorder()
 	handler.ServeHTTP(socketRecorder, localSocketRequest(http.MethodGet, "/sam/identity"))
@@ -114,24 +117,26 @@ func TestIdentityEvidenceReturnsVerifiableClosedResponse(t *testing.T) {
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
 	}
-	var response identityEvidenceResponse
-	decoder := json.NewDecoder(recorder.Body)
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&response); err != nil {
+	var response api.IdentityEvidenceResponse
+	if err := protojson.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if response.Schema != identityEvidenceSchema || response.PeerID != node.Host.ID().String() || !response.PeerBindingVerified || !response.Enrolled {
-		t.Fatalf("unexpected identity response: %+v", response)
+	if response.PeerId != node.Host.ID().String() || len(response.Biscuit) == 0 {
+		t.Fatalf("unexpected identity response: peer=%q biscuit=%d", response.PeerId, len(response.Biscuit))
 	}
-	if response.BiscuitExpiresAt != expiresAt.Format(time.RFC3339Nano) || len(response.TrustedControlPlaneKeys) != 1 {
-		t.Fatalf("unexpected expiry or key set: %+v", response)
+	if response.BiscuitExpiresAt != expiresAt.Unix() || len(response.TrustedControlPlaneKeys) != 1 {
+		t.Fatalf("unexpected expiry or key set: expiry=%d keys=%d", response.BiscuitExpiresAt, len(response.TrustedControlPlaneKeys))
 	}
-	der, err := base64.StdEncoding.DecodeString(response.TrustedControlPlaneKeys[0].SPKIDERBase64)
+	parsedKey, err := x509.ParsePKIXPublicKey(response.TrustedControlPlaneKeys[0])
 	if err != nil {
-		t.Fatalf("decode SPKI: %v", err)
+		t.Fatalf("parse SPKI: %v", err)
 	}
-	if sha256Fingerprint(der) != response.SelectedVerifyingKeyFingerprint {
-		t.Fatalf("selected key fingerprint does not match returned SPKI")
+	publicKey, ok := parsedKey.(ed25519.PublicKey)
+	if !ok || !publicKey.Equal(node.trustedKeys[0].Key) {
+		t.Fatalf("trusted control-plane key is not the enrolled key")
+	}
+	if response.CheckedAt <= 0 || response.CheckedAt > response.BiscuitExpiresAt {
+		t.Fatalf("invalid checked/expiry timestamps: checked=%d expiry=%d", response.CheckedAt, response.BiscuitExpiresAt)
 	}
 }
 
@@ -146,23 +151,29 @@ func TestBuildPeerEvidenceBindsRequestedConnectionAndBiscuitPeers(t *testing.T) 
 	if err != nil {
 		t.Fatalf("mint provider biscuit: %v", err)
 	}
-	fetchedAt := time.Now().UTC().Add(-time.Second)
 	response, err := node.buildPeerEvidence(provider.ID(), peerBiscuitObservation{
 		Biscuit:        providerBiscuit,
 		ConnectionPeer: provider.ID(),
-		FetchedAt:      fetchedAt,
 	}, time.Now().UTC())
 	if err != nil {
 		t.Fatalf("build peer evidence: %v", err)
 	}
-	if !response.Verified || !response.PeerBindingVerified || response.RequestedPeerID != provider.ID().String() || response.ConnectionPeerID != provider.ID().String() || response.BiscuitPeerID != provider.ID().String() {
+	if response.PeerId != provider.ID().String() || !bytes.Equal(response.Biscuit, providerBiscuit) {
 		t.Fatalf("unexpected peer binding: %+v", response)
 	}
-	if response.Attested.Labels["region"] != "us-east-1" || len(response.Revocation.RevocationIDs) == 0 || response.Freshness.CacheHit {
-		t.Fatalf("missing attestation, revocation, or freshness evidence: %+v", response)
+	if response.Labels["region"] != "us-east-1" || len(response.RevocationIds) == 0 {
+		t.Fatalf("missing attestation or revocation evidence: %+v", response)
 	}
-	if sha256Fingerprint(mustDecodeBase64(t, response.VerifyingKeySPKIDERBase64)) != response.VerifyingKeyFingerprint {
-		t.Fatalf("verifying key fingerprint does not match returned SPKI")
+	if response.Expiration != expiresAt.Unix() || response.CheckedAt <= 0 || response.CheckedAt > response.Expiration {
+		t.Fatalf("invalid checked/expiry timestamps: checked=%d expiry=%d", response.CheckedAt, response.Expiration)
+	}
+	parsedKey, err := x509.ParsePKIXPublicKey(response.VerifyingKey)
+	if err != nil {
+		t.Fatalf("parse verifying key SPKI: %v", err)
+	}
+	publicKey, ok := parsedKey.(ed25519.PublicKey)
+	if !ok || !publicKey.Equal(node.trustedKeys[0].Key) {
+		t.Fatalf("peer evidence verifying key is not in the trusted set")
 	}
 }
 
@@ -176,7 +187,7 @@ func TestBuildPeerEvidenceFailsClosedOnBindingRevocationAndKeyRotation(t *testin
 	if err != nil {
 		t.Fatalf("mint provider biscuit: %v", err)
 	}
-	observation := peerBiscuitObservation{Biscuit: providerBiscuit, ConnectionPeer: provider.ID(), FetchedAt: time.Now().UTC()}
+	observation := peerBiscuitObservation{Biscuit: providerBiscuit, ConnectionPeer: provider.ID()}
 	if _, err := node.buildPeerEvidence(other.ID(), observation, time.Now().UTC()); err == nil {
 		t.Fatalf("requested/connection mismatch must fail closed")
 	}
@@ -194,13 +205,4 @@ func TestBuildPeerEvidenceFailsClosedOnBindingRevocationAndKeyRotation(t *testin
 	if _, err := node.buildPeerEvidence(provider.ID(), observation, time.Now().UTC()); err == nil {
 		t.Fatalf("untrusted signing key must fail closed")
 	}
-}
-
-func mustDecodeBase64(t *testing.T, value string) []byte {
-	t.Helper()
-	decoded, err := base64.StdEncoding.DecodeString(value)
-	if err != nil {
-		t.Fatalf("decode base64: %v", err)
-	}
-	return decoded
 }

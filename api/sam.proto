@@ -345,5 +345,35 @@ message AgentStatusResponse {
   string error = 2;
 }
 
+// ============================================================================
+// Identity Evidence API
+// ============================================================================
+//
+// Read-only owner/control-plane material served by the node sidecar on
+// GET /sam/identity and GET /sam/peer/{peer_id}/evidence. Only reachable
+// over the filesystem-protected Unix socket or verified mTLS. A 200 asserts
+// the node verified the biscuit, its PeerID binding, and revocation state at
+// checked_at; independent verifiers recompute from the raw biscuit and keys.
+
+message IdentityEvidenceResponse {
+  string peer_id = 1;
+  bytes biscuit = 2;
+  int64 biscuit_expires_at = 3;
+  string control_plane_url = 4;
+  repeated bytes trusted_control_plane_keys = 5; // Ed25519 SPKI DER
+  int64 checked_at = 6;
+}
+
+message PeerEvidenceResponse {
+  string peer_id = 1;
+  bytes biscuit = 2;
+  bytes verifying_key = 3; // Ed25519 SPKI DER, member of the trusted set
+  repeated string roles = 4;
+  map<string, string> labels = 5;
+  int64 expiration = 6;
+  repeated string revocation_ids = 7; // hex
+  int64 checked_at = 8;
+}
+
 
 

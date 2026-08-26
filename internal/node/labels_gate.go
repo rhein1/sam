@@ -133,7 +133,6 @@ func (n *SamNode) fetchPeerBiscuit(ctx context.Context, peerID peer.ID) ([]byte,
 type peerBiscuitObservation struct {
 	Biscuit        []byte
 	ConnectionPeer peer.ID
-	FetchedAt      time.Time
 }
 
 // fetchPeerBiscuitEvidence is the uncached form used by the local evidence API.
@@ -184,6 +183,5 @@ func (n *SamNode) fetchPeerBiscuitEvidence(ctx context.Context, peerID peer.ID) 
 	return peerBiscuitObservation{
 		Biscuit:        resp.Biscuit,
 		ConnectionPeer: connectionPeer,
-		FetchedAt:      time.Now().UTC(),
 	}, nil
 }

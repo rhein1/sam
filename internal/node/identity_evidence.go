@@ -15,12 +15,10 @@
 package node
 
 import (
+	"bytes"
 	"crypto/ed25519"
-	"crypto/sha256"
 	"crypto/x509"
-	"encoding/base64"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"sort"
@@ -31,87 +29,16 @@ import (
 	"github.com/google/sam/api"
 	"github.com/google/sam/internal/identity"
 	"github.com/libp2p/go-libp2p/core/peer"
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
 )
-
-const (
-	identityEvidenceSchema = "sam.identity.v1"
-	peerEvidenceSchema     = "sam.peer-evidence.v1"
-	evidenceErrorSchema    = "sam.evidence-error.v1"
-)
-
-type controlPlaneKeyEvidence struct {
-	Fingerprint   string `json:"fingerprint"`
-	SPKIDERBase64 string `json:"spki_der_base64"`
-	ReceivedAt    string `json:"received_at"`
-}
-
-type identityEvidenceResponse struct {
-	Schema                          string                    `json:"schema"`
-	PeerID                          string                    `json:"peer_id"`
-	BiscuitPeerID                   string                    `json:"biscuit_peer_id"`
-	PeerBindingVerified             bool                      `json:"peer_binding_verified"`
-	ControlPlaneURL                 string                    `json:"control_plane_url"`
-	TrustedControlPlaneKeys         []controlPlaneKeyEvidence `json:"trusted_control_plane_keys"`
-	SelectedVerifyingKeyFingerprint string                    `json:"selected_verifying_key_fingerprint"`
-	Enrolled                        bool                      `json:"enrolled"`
-	Biscuit                         string                    `json:"biscuit"`
-	BiscuitExpiresAt                string                    `json:"biscuit_expires_at"`
-	CheckedAt                       string                    `json:"checked_at"`
-}
-
-type peerAttestationEvidence struct {
-	Role   []string          `json:"role"`
-	Labels map[string]string `json:"labels"`
-}
-
-type peerRevocationEvidence struct {
-	PeerRevoked   bool     `json:"peer_revoked"`
-	RevocationIDs []string `json:"revocation_ids"`
-	CheckedAt     string   `json:"checked_at"`
-	Source        string   `json:"source"`
-}
-
-type peerFreshnessEvidence struct {
-	FetchedAt      string  `json:"fetched_at"`
-	CheckedAt      string  `json:"checked_at"`
-	CacheHit       bool    `json:"cache_hit"`
-	CacheExpiresAt *string `json:"cache_expires_at"`
-}
-
-type peerEvidenceResponse struct {
-	Schema                    string                  `json:"schema"`
-	RequestedPeerID           string                  `json:"requested_peer_id"`
-	ConnectionPeerID          string                  `json:"connection_peer_id"`
-	BiscuitPeerID             string                  `json:"biscuit_peer_id"`
-	PeerBindingVerified       bool                    `json:"peer_binding_verified"`
-	Verified                  bool                    `json:"verified"`
-	Biscuit                   string                  `json:"biscuit"`
-	VerifyingKeyFingerprint   string                  `json:"verifying_key_fingerprint"`
-	VerifyingKeySPKIDERBase64 string                  `json:"verifying_key_spki_der_base64"`
-	VerifyingKeyReceivedAt    string                  `json:"verifying_key_received_at"`
-	Attested                  peerAttestationEvidence `json:"attested"`
-	Expiration                string                  `json:"expiration"`
-	Revocation                peerRevocationEvidence  `json:"revocation"`
-	Freshness                 peerFreshnessEvidence   `json:"freshness"`
-}
-
-type evidenceErrorResponse struct {
-	Schema string `json:"schema"`
-	Code   string `json:"code"`
-}
 
 type trustedKeySnapshot struct {
-	Key        ed25519.PublicKey
-	ReceivedAt time.Time
-	Evidence   controlPlaneKeyEvidence
+	Key     ed25519.PublicKey
+	SPKIDER []byte
 }
 
-func sha256Fingerprint(value []byte) string {
-	digest := sha256.Sum256(value)
-	return "sha256:" + hex.EncodeToString(digest[:])
-}
-
-func snapshotControlPlaneKey(key ed25519.PublicKey, receivedAt time.Time) (trustedKeySnapshot, error) {
+func snapshotControlPlaneKey(key ed25519.PublicKey) (trustedKeySnapshot, error) {
 	if len(key) != ed25519.PublicKeySize {
 		return trustedKeySnapshot{}, fmt.Errorf("invalid Ed25519 key size %d", len(key))
 	}
@@ -121,13 +48,8 @@ func snapshotControlPlaneKey(key ed25519.PublicKey, receivedAt time.Time) (trust
 		return trustedKeySnapshot{}, fmt.Errorf("marshal Ed25519 SPKI: %w", err)
 	}
 	return trustedKeySnapshot{
-		Key:        keyCopy,
-		ReceivedAt: receivedAt,
-		Evidence: controlPlaneKeyEvidence{
-			Fingerprint:   sha256Fingerprint(der),
-			SPKIDERBase64: base64.StdEncoding.EncodeToString(der),
-			ReceivedAt:    receivedAt.UTC().Format(time.RFC3339Nano),
-		},
+		Key:     keyCopy,
+		SPKIDER: der,
 	}, nil
 }
 
@@ -138,14 +60,14 @@ func (n *SamNode) trustedKeySnapshot() ([]trustedKeySnapshot, error) {
 
 	snapshots := make([]trustedKeySnapshot, 0, len(trusted))
 	for _, candidate := range trusted {
-		snapshot, err := snapshotControlPlaneKey(candidate.Key, candidate.ReceivedAt)
+		snapshot, err := snapshotControlPlaneKey(candidate.Key)
 		if err != nil {
 			return nil, err
 		}
 		snapshots = append(snapshots, snapshot)
 	}
 	sort.Slice(snapshots, func(i, j int) bool {
-		return snapshots[i].Evidence.Fingerprint < snapshots[j].Evidence.Fingerprint
+		return bytes.Compare(snapshots[i].SPKIDER, snapshots[j].SPKIDER) < 0
 	})
 	return snapshots, nil
 }
@@ -173,7 +95,7 @@ func (n *SamNode) stillTrustsKey(selected trustedKeySnapshot) bool {
 		return false
 	}
 	for _, candidate := range current {
-		if candidate.Evidence.Fingerprint == selected.Evidence.Fingerprint && candidate.Key.Equal(selected.Key) {
+		if candidate.Key.Equal(selected.Key) {
 			return true
 		}
 	}
@@ -190,18 +112,25 @@ func requireIdentityEvidenceTransport(next http.Handler) http.Handler {
 	})
 }
 
-func writeEvidenceJSON(w http.ResponseWriter, status int, value any) {
+func writeEvidenceProtoJSON(w http.ResponseWriter, status int, value proto.Message) {
+	body, err := protojson.Marshal(value)
+	if err != nil {
+		logger.Errorf("[IdentityEvidence] Failed to encode response: %v", err)
+		writeEvidenceError(w, http.StatusInternalServerError, "sam_evidence_encoding_failed")
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(value); err != nil {
-		logger.Errorf("[IdentityEvidence] Failed to encode response: %v", err)
+	if _, err := w.Write(body); err != nil {
+		logger.Errorf("[IdentityEvidence] Failed to write response: %v", err)
 	}
 }
 
 func writeEvidenceError(w http.ResponseWriter, status int, code string) {
-	writeEvidenceJSON(w, status, evidenceErrorResponse{Schema: evidenceErrorSchema, Code: code})
+	w.Header().Set("Cache-Control", "no-store")
+	http.Error(w, code, status)
 }
 
 func handleIdentityEvidence(n *SamNode, w http.ResponseWriter, r *http.Request) {
@@ -216,7 +145,7 @@ func handleIdentityEvidence(n *SamNode, w http.ResponseWriter, r *http.Request) 
 		writeEvidenceError(w, http.StatusServiceUnavailable, "sam_identity_evidence_unavailable")
 		return
 	}
-	writeEvidenceJSON(w, http.StatusOK, response)
+	writeEvidenceProtoJSON(w, http.StatusOK, response)
 }
 
 func handlePeerEvidence(n *SamNode, w http.ResponseWriter, r *http.Request) {
@@ -254,118 +183,91 @@ func handlePeerEvidence(n *SamNode, w http.ResponseWriter, r *http.Request) {
 		writeEvidenceError(w, http.StatusUnprocessableEntity, "sam_peer_evidence_unverifiable")
 		return
 	}
-	writeEvidenceJSON(w, http.StatusOK, response)
+	writeEvidenceProtoJSON(w, http.StatusOK, response)
 }
 
-func (n *SamNode) buildIdentityEvidence(checkedAt time.Time) (identityEvidenceResponse, error) {
+func (n *SamNode) buildIdentityEvidence(checkedAt time.Time) (*api.IdentityEvidenceResponse, error) {
 	if n == nil || n.Host == nil || n.Store == nil {
-		return identityEvidenceResponse{}, fmt.Errorf("node identity store is unavailable")
+		return nil, fmt.Errorf("node identity store is unavailable")
 	}
 	biscuitBytes := n.GetIdentity()
 	if len(biscuitBytes) == 0 {
-		return identityEvidenceResponse{}, fmt.Errorf("node is not enrolled")
+		return nil, fmt.Errorf("node is not enrolled")
 	}
 	snapshots, err := n.trustedKeySnapshot()
 	if err != nil || len(snapshots) == 0 {
-		return identityEvidenceResponse{}, fmt.Errorf("trusted control-plane keys unavailable: %w", err)
+		return nil, fmt.Errorf("trusted control-plane keys unavailable: %w", err)
 	}
 	b, selectedKey, err := identity.VerifyBiscuitAndGetKey(biscuitBytes, n.Host.ID(), keysFromSnapshot(snapshots), n.BiscuitTimeout)
 	if err != nil {
-		return identityEvidenceResponse{}, err
+		return nil, err
 	}
 	selected, ok := findSelectedKey(snapshots, selectedKey)
 	if !ok || !n.stillTrustsKey(selected) {
-		return identityEvidenceResponse{}, fmt.Errorf("selected verification key is no longer trusted")
+		return nil, fmt.Errorf("selected verification key is no longer trusted")
 	}
 	claims, err := extractBiscuitClaims(b, selectedKey, n.BiscuitTimeout, checkedAt)
 	if err != nil {
-		return identityEvidenceResponse{}, err
+		return nil, err
 	}
 	if claims.PeerID != n.Host.ID().String() {
-		return identityEvidenceResponse{}, fmt.Errorf("biscuit peer binding mismatch")
+		return nil, fmt.Errorf("biscuit peer binding mismatch")
 	}
 	controlPlaneURL, err := n.Store.LoadControlPlaneURL()
 	if err != nil {
-		return identityEvidenceResponse{}, fmt.Errorf("control-plane URL unavailable: %w", err)
+		return nil, fmt.Errorf("control-plane URL unavailable: %w", err)
 	}
-	keyEvidence := make([]controlPlaneKeyEvidence, 0, len(snapshots))
+	keyEvidence := make([][]byte, 0, len(snapshots))
 	for _, snapshot := range snapshots {
-		keyEvidence = append(keyEvidence, snapshot.Evidence)
+		keyEvidence = append(keyEvidence, append([]byte(nil), snapshot.SPKIDER...))
 	}
-	return identityEvidenceResponse{
-		Schema:                          identityEvidenceSchema,
-		PeerID:                          n.Host.ID().String(),
-		BiscuitPeerID:                   claims.PeerID,
-		PeerBindingVerified:             true,
-		ControlPlaneURL:                 controlPlaneURL,
-		TrustedControlPlaneKeys:         keyEvidence,
-		SelectedVerifyingKeyFingerprint: selected.Evidence.Fingerprint,
-		Enrolled:                        true,
-		Biscuit:                         base64.StdEncoding.EncodeToString(biscuitBytes),
-		BiscuitExpiresAt:                claims.Expiration.Format(time.RFC3339Nano),
-		CheckedAt:                       checkedAt.Format(time.RFC3339Nano),
+	return &api.IdentityEvidenceResponse{
+		PeerId:                  n.Host.ID().String(),
+		Biscuit:                 append([]byte(nil), biscuitBytes...),
+		BiscuitExpiresAt:        claims.Expiration.Unix(),
+		ControlPlaneUrl:         controlPlaneURL,
+		TrustedControlPlaneKeys: keyEvidence,
+		CheckedAt:               checkedAt.Unix(),
 	}, nil
 }
 
-func (n *SamNode) buildPeerEvidence(requested peer.ID, observation peerBiscuitObservation, checkedAt time.Time) (peerEvidenceResponse, error) {
+func (n *SamNode) buildPeerEvidence(requested peer.ID, observation peerBiscuitObservation, checkedAt time.Time) (*api.PeerEvidenceResponse, error) {
 	if requested == "" || observation.ConnectionPeer == "" || requested != observation.ConnectionPeer {
-		return peerEvidenceResponse{}, fmt.Errorf("requested and connection PeerIDs differ")
-	}
-	if n.peerIsRevoked(requested) {
-		return peerEvidenceResponse{}, fmt.Errorf("peer is revoked")
+		return nil, fmt.Errorf("requested and connection PeerIDs differ")
 	}
 	snapshots, err := n.trustedKeySnapshot()
 	if err != nil || len(snapshots) == 0 {
-		return peerEvidenceResponse{}, fmt.Errorf("trusted control-plane keys unavailable: %w", err)
+		return nil, fmt.Errorf("trusted control-plane keys unavailable: %w", err)
 	}
 	b, selectedKey, err := identity.VerifyBiscuitAndGetKey(observation.Biscuit, observation.ConnectionPeer, keysFromSnapshot(snapshots), n.BiscuitTimeout)
 	if err != nil {
-		return peerEvidenceResponse{}, err
+		return nil, err
 	}
 	selected, ok := findSelectedKey(snapshots, selectedKey)
 	if !ok {
-		return peerEvidenceResponse{}, fmt.Errorf("selected verification key is not in the trusted snapshot")
+		return nil, fmt.Errorf("selected verification key is not in the trusted snapshot")
 	}
 	claims, err := extractBiscuitClaims(b, selectedKey, n.BiscuitTimeout, checkedAt)
 	if err != nil {
-		return peerEvidenceResponse{}, err
+		return nil, err
 	}
 	if claims.PeerID != requested.String() || n.peerIsRevoked(requested) || !n.stillTrustsKey(selected) {
-		return peerEvidenceResponse{}, fmt.Errorf("peer binding, revocation, or trust state changed during verification")
+		return nil, fmt.Errorf("peer binding, revocation, or trust state changed during verification")
 	}
 
 	revocationIDs := make([]string, 0, len(b.RevocationIds()))
 	for _, id := range b.RevocationIds() {
 		revocationIDs = append(revocationIDs, hex.EncodeToString(id))
 	}
-	return peerEvidenceResponse{
-		Schema:                    peerEvidenceSchema,
-		RequestedPeerID:           requested.String(),
-		ConnectionPeerID:          observation.ConnectionPeer.String(),
-		BiscuitPeerID:             claims.PeerID,
-		PeerBindingVerified:       true,
-		Verified:                  true,
-		Biscuit:                   base64.StdEncoding.EncodeToString(observation.Biscuit),
-		VerifyingKeyFingerprint:   selected.Evidence.Fingerprint,
-		VerifyingKeySPKIDERBase64: selected.Evidence.SPKIDERBase64,
-		VerifyingKeyReceivedAt:    selected.Evidence.ReceivedAt,
-		Attested: peerAttestationEvidence{
-			Role:   claims.Roles,
-			Labels: claims.Labels,
-		},
-		Expiration: claims.Expiration.Format(time.RFC3339Nano),
-		Revocation: peerRevocationEvidence{
-			PeerRevoked:   false,
-			RevocationIDs: revocationIDs,
-			CheckedAt:     checkedAt.Format(time.RFC3339Nano),
-			Source:        "local_event_cache_and_store",
-		},
-		Freshness: peerFreshnessEvidence{
-			FetchedAt:      observation.FetchedAt.UTC().Format(time.RFC3339Nano),
-			CheckedAt:      checkedAt.Format(time.RFC3339Nano),
-			CacheHit:       false,
-			CacheExpiresAt: nil,
-		},
+	return &api.PeerEvidenceResponse{
+		PeerId:        requested.String(),
+		Biscuit:       append([]byte(nil), observation.Biscuit...),
+		VerifyingKey:  append([]byte(nil), selected.SPKIDER...),
+		Roles:         append([]string(nil), claims.Roles...),
+		Labels:        claims.Labels,
+		Expiration:    claims.Expiration.Unix(),
+		RevocationIds: revocationIDs,
+		CheckedAt:     checkedAt.Unix(),
 	}, nil
 }
 
