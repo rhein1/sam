@@ -12,45 +12,13 @@ spec:
       app: {{ include "sam-mesh.fullname" . }}-console
   template:
     metadata:
-      annotations:
-        # Secrets land as env vars, which are not live-reloaded; roll the pods on change.
-        checksum/secrets: {{ include (print $.Template.BasePath "/secrets.yaml") . | sha256sum }}
       labels:
         app: {{ include "sam-mesh.fullname" . }}-console
     spec:
-      {{- with .Values.console.nodeSelector }}
-      nodeSelector:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- with .Values.console.tolerations }}
-      tolerations:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- with .Values.console.affinity }}
-      affinity:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- with .Values.console.podSecurityContext }}
-      securityContext:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
       initContainers:
       - name: wait-control-plane
         image: curlimages/curl:8.6.0
         imagePullPolicy: {{ .Values.global.imagePullPolicy }}
-        securityContext:
-          # curlimages/curl's USER is non-numeric; runAsNonRoot needs an explicit uid.
-          runAsUser: 100
-          allowPrivilegeEscalation: false
-          capabilities:
-            drop: ["ALL"]
-        resources:
-          requests:
-            cpu: 10m
-            memory: 16Mi
-          limits:
-            cpu: 100m
-            memory: 64Mi
         command: ["/bin/sh", "-c"]
         args:
         - |
@@ -62,12 +30,8 @@ spec:
           done
       containers:
       - name: sam-console
-        image: "{{ .Values.console.image.repository }}:{{ .Values.console.image.tag | default .Values.global.imageTag }}"
+        image: "{{ .Values.console.image.repository }}:{{ .Values.global.imageTag }}"
         imagePullPolicy: {{ .Values.global.imagePullPolicy }}
-        {{- with .Values.console.securityContext }}
-        securityContext:
-          {{- toYaml . | nindent 10 }}
-        {{- end }}
         env:
         - name: SAM_ADMIN_TOKEN
           valueFrom:

@@ -47,52 +47,6 @@ func AuthorizerOptions(timeout time.Duration) []biscuit.AuthorizerOption {
 	return []biscuit.AuthorizerOption{biscuit.WithWorldOptions(datalog.WithMaxDuration(timeout))}
 }
 
-// EnforceExpiration injects the current time and the expiration check into an
-// authorizer. Every path that admits a biscuit must call this: expiry is a
-// Datalog check over a time fact, so an authorizer built without the fact
-// silently accepts expired tokens (see #296). A token carrying no expiration()
-// fact fails the check, so this is fail-closed.
-func EnforceExpiration(authorizer biscuit.Authorizer) {
-	authorizer.AddFact(biscuit.Fact{
-		Predicate: biscuit.Predicate{
-			Name: api.FactTime,
-			IDs:  []biscuit.Term{biscuit.Date(time.Now())},
-		},
-	})
-	authorizer.AddCheck(api.ControlPlaneStaticTimeCheck)
-}
-
-// ExpirationOf reports the expiration() fact of an already-authorized token, for
-// callers that cache an admission decision and must later know when it lapses.
-func ExpirationOf(authorizer biscuit.Authorizer) (time.Time, error) {
-	facts, err := authorizer.Query(biscuit.Rule{
-		Head: biscuit.Predicate{Name: "get_exp", IDs: []biscuit.Term{biscuit.Variable("e")}},
-		Body: []biscuit.Predicate{{Name: api.FactExpiration, IDs: []biscuit.Term{biscuit.Variable("e")}}},
-	})
-	if err != nil {
-		return time.Time{}, fmt.Errorf("expiration query failed: %w", err)
-	}
-
-	// A token may carry several; the earliest is the one that binds.
-	var earliest time.Time
-	for _, fact := range facts {
-		if len(fact.IDs) != 1 {
-			continue
-		}
-		date, ok := fact.IDs[0].(biscuit.Date)
-		if !ok {
-			continue
-		}
-		if t := time.Time(date); earliest.IsZero() || t.Before(earliest) {
-			earliest = t
-		}
-	}
-	if earliest.IsZero() {
-		return time.Time{}, fmt.Errorf("no %s fact in token", api.FactExpiration)
-	}
-	return earliest, nil
-}
-
 // MintBiscuitToken generates a signed Biscuit token for a peer with policy rules based on JWT claims.
 // labels are control-plane-attested key=value claims (canonical, pre-validated); empty means no claims.
 func MintBiscuitToken(signingKey ed25519.PrivateKey, claims jwt.MapClaims, token *oidc.IDToken, remotePeer peer.ID, biscuitExpiry time.Time, roles []string, policyRoles []*api.PolicyRole, labels map[string]string) ([]byte, []string, error) {
@@ -299,7 +253,14 @@ func VerifyBiscuitAndGetKey(biscuitData []byte, expectedPeer peer.ID, trustedPub
 			continue
 		}
 
-		EnforceExpiration(authorizer)
+		authorizer.AddFact(biscuit.Fact{
+			Predicate: biscuit.Predicate{
+				Name: api.FactTime,
+				IDs:  []biscuit.Term{biscuit.Date(time.Now())},
+			},
+		})
+
+		authorizer.AddCheck(api.ControlPlaneStaticTimeCheck)
 		authorizer.AddPolicy(api.AllowIfTruePolicy)
 
 		if err := authorizer.Authorize(); err == nil {
@@ -400,23 +361,9 @@ func MintBootstrapBiscuitToken(signingKey ed25519.PrivateKey, remotePeer peer.ID
 	return mintBiscuit(signingKey, remotePeer, []string{role}, expiration, nil, policyRoles, labels)
 }
 
-// VerifyExpiredAndExtractPeerID checks that the biscuit is signed by one of the
-// trusted keys and returns the peer ID, deliberately WITHOUT enforcing expiry.
-// Only the refresh flow may use it: a node refreshes precisely because its token
-// lapsed, so it has nothing unexpired to present. Callers must bound the request
-// some other way (the refresh handler gates on the session record and a signed
-// challenge). Everywhere else, use VerifyAndExtractPeerID.
-func VerifyExpiredAndExtractPeerID(trustedPublicKeys []ed25519.PublicKey, biscuitData []byte, timeout time.Duration) (peer.ID, error) {
-	return extractPeerID(trustedPublicKeys, biscuitData, timeout, false)
-}
-
-// VerifyAndExtractPeerID checks that the biscuit is signed by one of the trusted
-// keys and is unexpired, and returns the peer ID.
+// VerifyAndExtractPeerID checks that the biscuit is signed by one of the trusted keys and returns the peer ID.
+// This function does NOT perform time checks, making it suitable for token refresh flows.
 func VerifyAndExtractPeerID(trustedPublicKeys []ed25519.PublicKey, biscuitData []byte, timeout time.Duration) (peer.ID, error) {
-	return extractPeerID(trustedPublicKeys, biscuitData, timeout, true)
-}
-
-func extractPeerID(trustedPublicKeys []ed25519.PublicKey, biscuitData []byte, timeout time.Duration, enforceExpiry bool) (peer.ID, error) {
 	b, err := biscuit.Unmarshal(biscuitData)
 	if err != nil {
 		return "", fmt.Errorf("malformed biscuit: %w", err)
@@ -434,12 +381,6 @@ func extractPeerID(trustedPublicKeys []ed25519.PublicKey, biscuitData []byte, ti
 			lastErr = err
 			continue
 		}
-		if enforceExpiry {
-			EnforceExpiration(auth)
-		}
-		// No policy is added, so a token that passes every check still reports
-		// ErrNoMatchingPolicy; that is success here. A failed check reports the
-		// check error instead, so expiry still rejects.
 		if err := auth.Authorize(); err == nil || errors.Is(err, biscuit.ErrNoMatchingPolicy) {
 			authorizer = auth
 			verified = true
@@ -488,11 +429,7 @@ func extractPeerID(trustedPublicKeys []ed25519.PublicKey, biscuitData []byte, ti
 }
 
 // VerifyBiscuitRole checks that the biscuit is signed by the control plane's public key
-// and contains the specified role fact. It deliberately does NOT enforce expiry: its
-// callers either hold a token the control plane minted moments ago, or are deciding
-// whether an identity loaded from disk is worth starting with, where a lapsed token
-// should trigger a refresh rather than refuse to boot. Do not use it to admit a token
-// received from a peer.
+// and contains the specified role fact.
 func VerifyBiscuitRole(biscuitData []byte, controlPlanePubKey ed25519.PublicKey, expectedRole string, timeout time.Duration) error {
 	b, err := biscuit.Unmarshal(biscuitData)
 	if err != nil {

@@ -2,7 +2,7 @@
 title: "Kubernetes Deployment and Local Testing Guide"
 linkTitle: "Kubernetes Deployment and Local Testing Guide"
 ---
-This guide explains how to deploy the SAM control plane and router in a Kubernetes cluster and how to test it locally with `kind` — using the bundled `make kind-*` targets for a one-command mesh, or a manual setup. Both paths need `cloud-provider-kind`.
+This guide explains how to deploy the SAM control plane and router in a Kubernetes cluster and how to test it locally with `kind` — using the bundled `make kind-*` targets for a one-command mesh, or a manual setup with `cloud-provider-kind`.
 
 > [!TIP]
 > This guide focuses on local development sandboxing. For production-grade Kubernetes deployments (GKE, EKS, AKS), see the [Production Kubernetes Deployment](../../user/kubernetes-deployment/) guide.
@@ -19,26 +19,19 @@ The repository ships a one-command local mesh under `development/kind/`, driven 
 make kind-up
 ```
 
-This creates a `sam-kind` cluster (one control-plane plus three workers — one labeled `sam-role: control-plane`, and one each for `node-a` and `node-b`), builds the `sam-control-plane:local`, `sam-router:local`, and `sam-node:local` images, loads them into the cluster, and deploys:
+This creates a `sam-kind` cluster (one control-plane plus workers for the control plane, router, and `node-a` through `node-e`), builds the `sam-control-plane:local`, `sam-router:local`, and `sam-node:local` images, loads them into the cluster, and deploys:
 
 - The **control plane**, configured to trust the cluster's own OIDC issuer.
-- Two **nodes** declared in `development/kind/mesh-config.yaml` (`node-a` and `node-b`), both **bare** by default — assign services to suit what you're testing.
+- Five **nodes** declared in `development/kind/mesh-config.yaml` (`node-a` through `node-e`), all **bare** by default — assign services to suit what you're testing.
 
-In-cluster nodes authenticate to the control plane via **Workload Identity Federation** (projected ServiceAccount tokens), so no static secrets or mock OIDC provider are needed.
-
-The mesh is exposed through Gateway API LoadBalancer addresses, so there are no port-forwards and no `extraPortMappings`. `run.sh` runs **`cloud-provider-kind`** as a container (a hard prerequisite — it needs the docker socket) to serve those addresses, and prints them when the mesh is up:
-
-- The **control plane** on its own address, routing the 8 exact enrollment paths, plus a dev-only `/admin` route.
-- The **console** at `/console/` on that same address, shaped like the production deployment: `/console` 302s to `/console/`, and a `URLRewrite` filter strips the prefix before the console sees the request.
-- **Dex** on its own address, deployed from `development/kind/dex.yaml` rather than the chart — Dex is an independent component the chart no longer bundles.
-- The **router** at its own node's IP on port 4501, TCP **and** QUIC, announced from `status.hostIP`.
+Nodes authenticate to the control plane via **Workload Identity Federation** (projected ServiceAccount tokens), so no static secrets or mock OIDC provider are needed. The control plane is exposed to the host on `127.0.0.1:9090` (HTTP enroll) and `127.0.0.1:4001` (libp2p) via a NodePort and the cluster's `extraPortMappings` — `cloud-provider-kind` is not required.
 
 Once everything is up, `make kind-up` opens a tmux session with live per-pod logs (control plane, router and each node in its own pane). Manage the mesh with:
 
 ```bash
 make kind-up ARGS=-s     # bring the mesh up without attaching the log view
 make kind-logs           # (re)attach the live-logs tmux session
-make kind-down           # delete the sam-kind cluster and stop cloud-provider-kind
+make kind-down           # delete the sam-kind cluster
 ```
 
 ### Mesh Layout (`mesh-config.yaml`)
@@ -47,16 +40,17 @@ The nodes that make up the dev mesh are declared in `development/kind/mesh-confi
 
 ```yaml
 # node -> service. A blank value means a bare node (no service, e.g. a caller).
-# Set a value to host a service on that node; the value is a folder path under
-# development/examples/, e.g:
-#   node-a: calc-mcp
-#   node-b: code-reviewer-pool/reviewer
-# All nodes ship bare by default — assign services to suit what you're testing.
+# The service value is a folder path under development/examples/, e.g:
+#   node-b: calc-mcp
+#   node-c: code-reviewer-pool/reviewer
 node-a:
 node-b:
+node-c:
+node-d:
+node-e:
 ```
 
-- The key is the node's name. The cluster currently ships with a control plane and router plus these **two** agent nodes, both bare by default; each is pinned to a matching worker via the `sam-role` labels in `kind-config.yaml`.
+- The key is the node's name. The cluster currently ships with a control plane and router plus these **five** agent nodes, all bare by default; each is pinned to a matching worker via the `sam-role` labels in `kind-config.yaml`.
 - A **blank** value is a bare node — a `sam-node` with no local service, useful as a caller/consumer.
 - A **non-blank** value is a folder name under `development/examples/`. That service is built and deployed as a **sidecar** next to the node, and the node is configured to advertise it to the mesh.
 
@@ -81,12 +75,12 @@ A service is any backend a node advertises to the mesh. Its kind is set by the `
      ```
      The sidecar and `sam-node` share the pod's network, so `target_url` is always `127.0.0.1:<port>`, where `<port>` matches the port your service listens on.
 
-2. **Assign it to a node** in `mesh-config.yaml` — set the value on a free node slot (`node-a` or `node-b`):
+2. **Assign it to a node** in `mesh-config.yaml` — set the value on any free node slot (`node-a` through `node-e`):
    ```yaml
    node-a: my-mcp
    ```
    > [!NOTE]
-   > There are two node slots because `kind-config.yaml` defines two workers labeled `sam-role: node-a|node-b`. To host more than two services at once, add a matching labeled worker there too.
+   > There are five node slots because `kind-config.yaml` defines five workers labeled `sam-role: node-a|node-b|node-c|node-d|node-e`. To host more than five services at once, add a matching labeled worker there too.
 
 3. **Recreate the cluster** so the new service is built and deployed:
    ```bash
@@ -110,7 +104,7 @@ make build            # produce ./bin/sam-node
 make kind-local-node
 ```
 
-This mints a bootstrap token through the control plane's `/admin` API and runs `./bin/sam-node` against the control plane's gateway address — the same credential and path a real external node uses — exposing its MCP API on `127.0.0.1:9099` with the API token `devtoken`. Extra flags pass through via `ARGS`, e.g. to host an example service:
+This mints a ServiceAccount token and runs `./bin/sam-node` against the control plane at `127.0.0.1:9090`, exposing its MCP API on `127.0.0.1:9099` with the API token `devtoken`. Extra flags pass through via `ARGS`, e.g. to host an example service:
 
 ```bash
 make kind-local-node ARGS="--config development/examples/calc-mcp/sam-node-config.yaml"

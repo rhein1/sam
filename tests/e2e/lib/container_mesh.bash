@@ -325,16 +325,11 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
     export KUBERNETES_CLUSTER_NAME="sam-wi-test"
     export KUBECONTEXT="kind-${KUBERNETES_CLUSTER_NAME}"
 
-    # Recreating is the default so a local run matches CI, which builds a cluster
-    # per run. Reuse carries over database PVCs, control plane signing keys and
-    # bootstrap tokens; E2E_REUSE_CLUSTER=1 trades that fidelity for a faster loop.
-    local reused_cluster=0
-    if [[ "${E2E_REUSE_CLUSTER:-0}" == "1" ]] && kind get clusters | grep -q "^${KUBERNETES_CLUSTER_NAME}$"; then
-      kind export kubeconfig --name "${KUBERNETES_CLUSTER_NAME}"
-      reused_cluster=1
-    else
+    if ! kind get clusters | grep -q "^${KUBERNETES_CLUSTER_NAME}$"; then
       kind delete cluster --name "${KUBERNETES_CLUSTER_NAME}" >/dev/null 2>&1 || true
       kind create cluster --name "${KUBERNETES_CLUSTER_NAME}" --config=tests/e2e/fixtures/kind-cluster.yaml
+    else
+      kind export kubeconfig --name "${KUBERNETES_CLUSTER_NAME}"
     fi
 
     kind load docker-image sam-control-plane:local --name "${KUBERNETES_CLUSTER_NAME}"
@@ -368,41 +363,23 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
       fi
     fi
 
-    # router.externalAddrs: nodes resolve sam-router per-network via --add-host, so the router must
-    # announce that name. Announcing a node IP instead is unroutable from an isolated test network.
-    # bootstrap.nodeServices: policy.bats asserts the control plane denies an ungranted service, so
-    # this lane pins the grants it tests rather than inheriting the chart default.
-    local helm_args=(--kube-context="${KUBECONTEXT}" upgrade --install sam ./charts/sam-mesh
-      --namespace default
-      --set fullnameOverride="sam"
-      --set global.imageTag="local"
-      --set controlPlane.oidcIssuer="${ISSUERS//,/\\,}"
-      --set controlPlane.allowedAudiences="sam-mesh-audience\,sam-control-plane-audience"
-      --set controlPlane.insecureSkipTlsVerify=true
-      --set controlPlane.adminToken="super-secret-admin-token"
-      --set controlPlane.replicaCount=2
-      --set controlPlane.hostPort=8080
-      --set router.useOidcToken=false
-      --set router.hostPort=4501
+    "${helm_bin}" --kube-context="${KUBECONTEXT}" upgrade --install sam ./charts/sam-mesh \
+      --namespace default \
+      --set fullnameOverride="sam" \
+      --set global.imageTag="local" \
+      --set controlPlane.oidcIssuer="${ISSUERS//,/\\,}" \
+      --set controlPlane.allowedAudiences="sam-mesh-audience\,sam-control-plane-audience" \
+      --set controlPlane.insecureSkipTlsVerify=true \
+      --set controlPlane.adminToken="super-secret-admin-token" \
+      --set controlPlane.replicaCount=2 \
+      --set controlPlane.hostPort=8080 \
+      --set router.useOidcToken=false \
+      --set router.hostPort=4501 \
       --set console.enabled=false
-      --set 'router.externalAddrs={/dns4/sam-router/tcp/4501}'
-      --set 'bootstrap.nodeServices={mcp://calculator,mcp://db-agent,mcp://http-tool,mcp://stdio-tool,system://sam.catalog}')
-    if ! "${helm_bin}" "${helm_args[@]}"; then
-      # The reused cluster may hold StatefulSets whose immutable spec (e.g.
-      # volumeClaimTemplates) changed; drop them (PVCs survive) and retry.
-      kubectl --context="${KUBECONTEXT}" delete statefulset sam-router sam-db --ignore-not-found
-      "${helm_bin}" "${helm_args[@]}"
-    fi
 
     mesh_wait_for_rollout statefulset/sam-db
     mesh_wait_for_rollout deployment/sam-control-plane
     mesh_wait_for_job job/sam-bootstrap
-    # A router surviving a reinstall holds a biscuit no current control plane key
-    # verifies and a bootstrap token past its 24h default, so it can never lease
-    # again. Restarting re-enrolls it against the state this run just installed.
-    if [[ "${reused_cluster}" == "1" ]]; then
-      kubectl --context="${KUBECONTEXT}" rollout restart statefulset/sam-router
-    fi
     mesh_wait_for_rollout statefulset/sam-router
 
     local i
@@ -415,22 +392,6 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
     local router_peer_id
     router_peer_id=$(kubectl --context="${KUBECONTEXT}" logs "sam-router-0" | grep -oE '12D3Koo[a-zA-Z0-9]+' | head -n 1 || true)
     [[ -n "${router_peer_id}" ]]
-
-    # The router pod reports Ready before its lease reaches the control plane, and
-    # a node's /register serves router addresses from that lease, so a node
-    # started in between enrolls against an empty list and exits.
-    local router_node_ip
-    router_node_ip=$(docker inspect -f "{{(index .NetworkSettings.Networks \"${MESH_NETWORK:-kind}\").IPAddress}}" \
-      "$(kubectl --context="${KUBECONTEXT}" get pod sam-router-0 -o jsonpath='{.spec.nodeName}')")
-    local lease_deadline=$((SECONDS + 60))
-    until docker run --rm --network "${MESH_NETWORK:-kind}" python:3.12 \
-        curl -sf --max-time 5 "http://${router_node_ip}:8080/info" 2>/dev/null | grep -qaF "${router_peer_id}"; do
-      if ((SECONDS >= lease_deadline)); then
-        echo "router lease did not reach the control plane within 60s" >&2
-        return 1
-      fi
-      sleep 1
-    done
 
     echo "${router_peer_id}" > "/tmp/sam-wi-test-router-peer-id"
     return 0

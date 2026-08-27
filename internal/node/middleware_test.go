@@ -140,14 +140,6 @@ func TestAuthorize(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
-		Name: api.FactExpiration,
-		IDs:  []biscuit.Term{biscuit.Date(time.Now().Add(time.Hour))},
-	}})
-	if err != nil {
-		t.Fatal(err)
-	}
-
 	b, err := builder.Build()
 	if err != nil {
 		t.Fatal(err)
@@ -171,80 +163,6 @@ func TestAuthorize(t *testing.T) {
 
 	if err := node.Authorize(tokenBytes, req, pub); err != nil {
 		t.Fatalf("Authorize failed: %v", err)
-	}
-}
-
-// TestAuthorizeRejectsExpiredBiscuit reproduces #296: SamNode.Authorize did not
-// inject the time(now) fact nor the ControlPlaneStaticTimeCheck, so an expired
-// biscuit that would be rejected by identity.VerifyBiscuit was still accepted
-// on the node dataplane.
-func TestAuthorizeRejectsExpiredBiscuit(t *testing.T) {
-	dir, err := os.MkdirTemp("", "middleware-test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		_ = os.RemoveAll(dir)
-	}()
-
-	store, err := NewStore(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		_ = store.Close()
-	}()
-
-	pub, priv, err := ed25519.GenerateKey(nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	dummyPeer := peer.ID("dummy-peer")
-
-	builder := biscuit.NewBuilder(priv)
-	_ = builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{Name: api.FactTargetUnrestricted}})
-	_ = builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
-		Name: "node",
-		IDs:  []biscuit.Term{biscuit.String(dummyPeer.String())},
-	}})
-	_ = builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
-		Name: api.FactClientPeerID,
-		IDs:  []biscuit.Term{biscuit.String(dummyPeer.String())},
-	}})
-	_ = builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
-		Name: api.FactGrantedServiceExact,
-		IDs:  []biscuit.Term{biscuit.String(api.SystemNamespace), biscuit.String("/test/proto")},
-	}})
-	// Expired an hour ago.
-	_ = builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
-		Name: api.FactExpiration,
-		IDs:  []biscuit.Term{biscuit.Date(time.Now().Add(-time.Hour))},
-	}})
-
-	b, err := builder.Build()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	tokenBytes, err := b.Serialize()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	node := &SamNode{
-		Store:          store,
-		trustedKeys:    []TrustedKey{{Key: pub, ReceivedAt: time.Now()}},
-		BiscuitTimeout: 500 * time.Millisecond,
-	}
-
-	req := RequestContext{
-		PeerID:   dummyPeer,
-		Protocol: "/test/proto",
-	}
-
-	if err := node.Authorize(tokenBytes, req, pub); err == nil {
-		t.Fatal("Authorize succeeded with an expired biscuit; expiration is not enforced on the node dataplane")
 	}
 }
 
@@ -355,10 +273,6 @@ func TestBaselineRules(t *testing.T) {
 			_ = builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
 				Name: "node",
 				IDs:  []biscuit.Term{biscuit.String(dummyPeer.String())},
-			}})
-			_ = builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
-				Name: api.FactExpiration,
-				IDs:  []biscuit.Term{biscuit.Date(time.Now().Add(time.Hour))},
 			}})
 
 			// For the happy paths, add the matching client_peer_id
@@ -498,14 +412,6 @@ attenuation:
 			err = builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
 				Name: api.FactClientPeerID,
 				IDs:  []biscuit.Term{biscuit.String(dummyPeer.String())},
-			}})
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			err = builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
-				Name: api.FactExpiration,
-				IDs:  []biscuit.Term{biscuit.Date(time.Now().Add(time.Hour))},
 			}})
 			if err != nil {
 				t.Fatal(err)
@@ -666,7 +572,6 @@ func TestWithBiscuitAuth_MutualBiscuit(t *testing.T) {
 		{Predicate: biscuit.Predicate{Name: "client_peer_id", IDs: []biscuit.Term{biscuit.String(clientPeer.String())}}},
 		{Predicate: biscuit.Predicate{Name: "granted_service_all_types"}},
 		{Predicate: biscuit.Predicate{Name: "target_unrestricted"}},
-		{Predicate: biscuit.Predicate{Name: api.FactExpiration, IDs: []biscuit.Term{biscuit.Date(time.Now().Add(time.Hour))}}},
 	} {
 		if err := builder.AddAuthorityFact(f); err != nil {
 			t.Fatal(err)
@@ -887,10 +792,6 @@ func TestMiddlewareTargetChecks(t *testing.T) {
 			_ = builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
 				Name: api.FactNode,
 				IDs:  []biscuit.Term{biscuit.String(dummyPeer.String())},
-			}})
-			_ = builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
-				Name: api.FactExpiration,
-				IDs:  []biscuit.Term{biscuit.Date(time.Now().Add(time.Hour))},
 			}})
 			// Allow exact service
 			factStr := fmt.Sprintf(`%s("mcp", "test_tool")`, api.FactGrantedServiceExact)

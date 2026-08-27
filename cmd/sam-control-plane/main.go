@@ -41,7 +41,6 @@ var (
 	keyRotationInterval   time.Duration
 	keyGracePeriod        time.Duration
 	leaseDuration         time.Duration
-	biscuitTTL            time.Duration
 	adminTokenPath        string
 	insecureSkipTLSVerify bool
 	logLevel              string
@@ -121,7 +120,6 @@ func main() {
 				KeyGracePeriod:        keyGracePeriod,
 				InsecureSkipTLSVerify: insecureSkipTLSVerify,
 				BiscuitTimeout:        10 * time.Second,
-				BiscuitTTL:            biscuitTTL,
 				AdminToken:            adminToken,
 				AutoApproveEnrollment: autoApproveEnrollment,
 			}
@@ -155,7 +153,6 @@ func main() {
 	rootCmd.Flags().DurationVar(&keyRotationInterval, "key-rotation-interval", 24*time.Hour, "Key rotation interval (e.g. 24h). 0 disables rotation.")
 	rootCmd.Flags().DurationVar(&keyGracePeriod, "key-grace-period", 1*time.Hour, "Key grace period for rotated keys.")
 	rootCmd.Flags().DurationVar(&leaseDuration, "lease-duration", 15*time.Minute, "Router lease registration TTL.")
-	rootCmd.Flags().DurationVar(&biscuitTTL, "biscuit-ttl", api.BiscuitTokenTTL, "Lifespan minted into every issued Biscuit's expiration fact. Capped to the OIDC token's own expiry when shorter.")
 	rootCmd.Flags().StringVar(&adminTokenPath, "admin-token-path", "", "Path to file containing the token for authenticating policy REST API requests (or env SAM_ADMIN_TOKEN)")
 	rootCmd.Flags().BoolVar(&insecureSkipTLSVerify, "insecure-skip-tls-verify", false, "Skip TLS verification for OIDC providers")
 	rootCmd.Flags().StringVar(&logLevel, "log-level", "info", "Log level (debug, info, warn, error)")

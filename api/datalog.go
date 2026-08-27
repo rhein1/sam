@@ -253,9 +253,7 @@ var (
 	// TargetFactRules maps node and OIDC claims to target_fact datalog facts.
 	TargetFactRules []biscuit.Rule
 
-	// ControlPlaneStaticTimeCheck is the standard check for verifying a Biscuit's
-	// own expiration() fact. Every path that admits a token must add it together
-	// with a FactTime fact; see identity.EnforceExpiration.
+	// ControlPlaneStaticTimeCheck is the standard check for verifying OIDC token expiration.
 	ControlPlaneStaticTimeCheck biscuit.Check
 
 	// AllowIfTruePolicy is the static policy "allow if true" used during token verification.

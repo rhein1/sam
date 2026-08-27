@@ -118,7 +118,7 @@ kind-logs:
 	./development/kind/run.sh -l
 
 kind-down:
-	./development/kind/run.sh -d
+	kind delete cluster --name sam-kind
 
 .PHONY: kind-local-node
 kind-local-node:
@@ -194,20 +194,8 @@ helm-lint:
 	fi; \
 	$$HELM_BIN lint ./charts/sam-mesh
 
-# render the chart to bin/chart/ for inspection; pass extra flags via ARGS, e.g. ARGS="--set gateway.enabled=true"
-.PHONY: helm-template
-helm-template:
-	rm -rf bin/chart
-	helm template sam-mesh ./charts/sam-mesh --output-dir bin/chart $(ARGS)
-
 lint: fmt helm-lint
 	hack/lint.sh
-
-# fast chart template checks; no cluster needed
-.PHONY: helm-test
-helm-test:
-	@helm plugin list 2>/dev/null | grep -q '^unittest' || helm plugin install https://github.com/helm-unittest/helm-unittest
-	helm unittest charts/sam-mesh
 
 .PHONY: verify
 verify:

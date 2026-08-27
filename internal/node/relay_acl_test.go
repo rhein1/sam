@@ -18,8 +18,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/sam/api"
-	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
 )
@@ -38,14 +36,14 @@ func TestNodeRelayACL_AllowConnect(t *testing.T) {
 	}
 
 	// Src is authenticated, dest is not -> should fail
-	node.authPeers.Store(srcPeer, time.Now().Add(time.Hour))
+	node.authPeers.Store(srcPeer, struct{}{})
 	if acl.AllowConnect(srcPeer, srcAddr, destPeer) {
 		t.Errorf("Expected AllowConnect to return false when dest is not authenticated, even if src is")
 	}
 
 	// Dest is authenticated, src is not -> should succeed
 	node.authPeers.Delete(srcPeer)
-	node.authPeers.Store(destPeer, time.Now().Add(time.Hour))
+	node.authPeers.Store(destPeer, struct{}{})
 	if !acl.AllowConnect(srcPeer, srcAddr, destPeer) {
 		t.Errorf("Expected AllowConnect to return true when dest is authenticated")
 	}
@@ -62,66 +60,8 @@ func TestNodeRelayACL_AllowReserve(t *testing.T) {
 		t.Errorf("Expected AllowReserve to return false when peer is not authenticated")
 	}
 
-	node.authPeers.Store(peerID, time.Now().Add(time.Hour))
+	node.authPeers.Store(peerID, struct{}{})
 	if !acl.AllowReserve(peerID, addr) {
 		t.Errorf("Expected AllowReserve to return true when peer is authenticated")
-	}
-}
-
-// TestExpiredAdmissionLosesRelayRights covers a token lapsing after the peer was
-// admitted. The handshake only proves validity at that instant, so the ACL has
-// to re-check, otherwise one handshake buys relay rights forever.
-func TestExpiredAdmissionLosesRelayRights(t *testing.T) {
-	node := &SamNode{BiscuitTimeout: 500 * time.Millisecond}
-	acl := &nodeRelayACL{node: node}
-
-	peerID := peer.ID("lapsed-peer")
-	addr, _ := multiaddr.NewMultiaddr("/ip4/127.0.0.1/tcp/1234")
-
-	node.authPeers.Store(peerID, time.Now().Add(-time.Second))
-	if acl.AllowReserve(peerID, addr) {
-		t.Error("expired admission still holds relay rights")
-	}
-	if _, still := node.authPeers.Load(peerID); still {
-		t.Error("expired admission was not evicted")
-	}
-
-	// A value of any other type is a bug, not an admission.
-	node.authPeers.Store(peerID, true)
-	if acl.AllowReserve(peerID, addr) {
-		t.Error("malformed admission entry granted relay rights")
-	}
-}
-
-// TestBannedPeerLosesRelayRights covers a ban arriving after the peer was
-// already admitted: the relay ACL reads authPeers, so leaving a stale entry
-// there keeps granting reservations to a revoked peer.
-func TestBannedPeerLosesRelayRights(t *testing.T) {
-	revokedCache, err := lru.New[string, int64](10)
-	if err != nil {
-		t.Fatal(err)
-	}
-	node := &SamNode{revokedPeers: revokedCache, BiscuitTimeout: 500 * time.Millisecond}
-	acl := &nodeRelayACL{node: node}
-
-	peerID, err := peer.Decode("12D3KooWAFv4iJst5G6MjwXhZ66K5zS1tP7A9vSg4vK8f1T7X8t9")
-	if err != nil {
-		t.Fatal(err)
-	}
-	addr, _ := multiaddr.NewMultiaddr("/ip4/127.0.0.1/tcp/1234")
-
-	node.authPeers.Store(peerID, time.Now().Add(time.Hour))
-	if !acl.AllowReserve(peerID, addr) {
-		t.Fatal("expected an admitted peer to hold relay rights")
-	}
-
-	node.handleBannedEvent(&api.MeshEvent{
-		Type:      api.MeshEvent_BANNED,
-		PeerId:    peerID.String(),
-		Timestamp: time.Now().UnixMilli(),
-	})
-
-	if acl.AllowReserve(peerID, addr) {
-		t.Error("banned peer still holds relay rights")
 	}
 }

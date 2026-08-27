@@ -6,49 +6,18 @@ metadata:
     {{- include "sam-mesh.labels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.controlPlane.replicaCount }}
-  {{- if .Values.controlPlane.hostPort }}
-  # hostPort: a surged pod can't bind a port the old pod still holds, so the
-  # default maxSurge=1 deadlocks the rollout on port-saturated nodes.
-  strategy:
-    rollingUpdate:
-      maxSurge: 0
-      maxUnavailable: 1
-  {{- end }}
   selector:
     matchLabels:
       app: {{ include "sam-mesh.fullname" . }}-control-plane
   template:
     metadata:
-      annotations:
-        # Secrets land as env vars, which are not live-reloaded; roll the pods on change.
-        checksum/secrets: {{ include (print $.Template.BasePath "/secrets.yaml") . | sha256sum }}
       labels:
         app: {{ include "sam-mesh.fullname" . }}-control-plane
     spec:
-      {{- with .Values.controlPlane.nodeSelector }}
-      nodeSelector:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- with .Values.controlPlane.tolerations }}
-      tolerations:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- with .Values.controlPlane.affinity }}
-      affinity:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- with .Values.controlPlane.podSecurityContext }}
-      securityContext:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
       containers:
       - name: sam-control-plane
-        image: "{{ .Values.controlPlane.image.repository }}:{{ .Values.controlPlane.image.tag | default .Values.global.imageTag }}"
+        image: "{{ .Values.controlPlane.image.repository }}:{{ .Values.global.imageTag }}"
         imagePullPolicy: {{ .Values.global.imagePullPolicy }}
-        {{- with .Values.controlPlane.securityContext }}
-        securityContext:
-          {{- toYaml . | nindent 10 }}
-        {{- end }}
         env:
         - name: DB_PASSWORD
           valueFrom:

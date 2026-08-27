@@ -262,8 +262,6 @@ func (n *SamNode) Authorize(rawToken []byte, req RequestContext, pubKey ed25519.
 	// Enforce client_peer_id matches connection_peer_id
 	authorizer.AddCheck(api.BaselineReplayCheck)
 
-	identity.EnforceExpiration(authorizer)
-
 	// Inject facts from our own identity token to support target matching
 	if err := n.injectIdentityFacts(authorizer, pubKey); err != nil {
 		return fmt.Errorf("failed to inject target facts: %w", err)

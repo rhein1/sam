@@ -108,23 +108,7 @@ before building (a free key is fine for the demo).
 
 ### 2. Mesh layout
 
-This use case needs five node slots, and the cluster ships with two (`node-a`
-and `node-b`). Add the three missing workers to
-`development/kind/kind-config.yaml` first:
-
-```yaml
-  - role: worker
-    labels:
-      sam-role: node-c
-  - role: worker
-    labels:
-      sam-role: node-d
-  - role: worker
-    labels:
-      sam-role: node-e
-```
-
-Then write this layout into `development/kind/mesh-config.yaml`:
+The layout ships in `development/kind/mesh-config.yaml`:
 
 ```yaml
 node-a:                                 # bare node (orchestrator entry)

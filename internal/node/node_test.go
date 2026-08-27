@@ -22,11 +22,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/biscuit-auth/biscuit-go/v2"
 	"github.com/google/sam/api"
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/libp2p/go-libp2p/core/crypto"
-	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
 )
 
@@ -141,57 +139,6 @@ func TestHandleKeyRotationEvent(t *testing.T) {
 
 	if len(node.trustedKeys) != 1 {
 		t.Errorf("Expected 1 trusted key, got %d", len(node.trustedKeys))
-	}
-}
-
-// TestVerifyBiscuitRejectsExpiredToken covers the peer-admission half of #296:
-// HandleAuthHandshake admits a peer into authPeers, which the relay ACL then
-// trusts, so it must reject an expired token exactly like the dataplane does.
-func TestVerifyBiscuitRejectsExpiredToken(t *testing.T) {
-	pub, priv, err := ed25519.GenerateKey(nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	remotePeer := peer.ID("dummy-peer")
-
-	mint := func(expiration time.Time) []byte {
-		builder := biscuit.NewBuilder(priv)
-		for _, f := range []biscuit.Fact{
-			{Predicate: biscuit.Predicate{Name: api.FactNode, IDs: []biscuit.Term{biscuit.String(remotePeer.String())}}},
-			{Predicate: biscuit.Predicate{Name: api.FactExpiration, IDs: []biscuit.Term{biscuit.Date(expiration)}}},
-		} {
-			if err := builder.AddAuthorityFact(f); err != nil {
-				t.Fatal(err)
-			}
-		}
-		b, err := builder.Build()
-		if err != nil {
-			t.Fatal(err)
-		}
-		data, err := b.Serialize()
-		if err != nil {
-			t.Fatal(err)
-		}
-		return data
-	}
-
-	node := &SamNode{
-		trustedKeys:    []TrustedKey{{Key: pub, ReceivedAt: time.Now()}},
-		BiscuitTimeout: 500 * time.Millisecond,
-	}
-
-	want := time.Now().Add(time.Hour)
-	_, expiry, err := node.verifyBiscuit(mint(want), remotePeer)
-	if err != nil {
-		t.Fatalf("valid token rejected: %v", err)
-	}
-	// The admission is cached against this instant, so it has to be the token's.
-	if skew := expiry.Sub(want); skew < -time.Second || skew > time.Second {
-		t.Errorf("reported expiry %v, want ~%v", expiry, want)
-	}
-
-	if _, _, err := node.verifyBiscuit(mint(time.Now().Add(-time.Hour)), remotePeer); err == nil {
-		t.Fatal("expired token admitted on the peer-authentication path")
 	}
 }
 

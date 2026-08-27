@@ -2638,6 +2638,190 @@ func (x *AgentStatusResponse) GetError() string {
 	return ""
 }
 
+type IdentityEvidenceResponse struct {
+	state                   protoimpl.MessageState `protogen:"open.v1"`
+	PeerId                  string                 `protobuf:"bytes,1,opt,name=peer_id,json=peerId,proto3" json:"peer_id,omitempty"`
+	Biscuit                 []byte                 `protobuf:"bytes,2,opt,name=biscuit,proto3" json:"biscuit,omitempty"`
+	BiscuitExpiresAt        int64                  `protobuf:"varint,3,opt,name=biscuit_expires_at,json=biscuitExpiresAt,proto3" json:"biscuit_expires_at,omitempty"`
+	ControlPlaneUrl         string                 `protobuf:"bytes,4,opt,name=control_plane_url,json=controlPlaneUrl,proto3" json:"control_plane_url,omitempty"`
+	TrustedControlPlaneKeys [][]byte               `protobuf:"bytes,5,rep,name=trusted_control_plane_keys,json=trustedControlPlaneKeys,proto3" json:"trusted_control_plane_keys,omitempty"` // Ed25519 SPKI DER
+	CheckedAt               int64                  `protobuf:"varint,6,opt,name=checked_at,json=checkedAt,proto3" json:"checked_at,omitempty"`
+	unknownFields           protoimpl.UnknownFields
+	sizeCache               protoimpl.SizeCache
+}
+
+func (x *IdentityEvidenceResponse) Reset() {
+	*x = IdentityEvidenceResponse{}
+	mi := &file_api_sam_proto_msgTypes[39]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *IdentityEvidenceResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*IdentityEvidenceResponse) ProtoMessage() {}
+
+func (x *IdentityEvidenceResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_api_sam_proto_msgTypes[39]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use IdentityEvidenceResponse.ProtoReflect.Descriptor instead.
+func (*IdentityEvidenceResponse) Descriptor() ([]byte, []int) {
+	return file_api_sam_proto_rawDescGZIP(), []int{39}
+}
+
+func (x *IdentityEvidenceResponse) GetPeerId() string {
+	if x != nil {
+		return x.PeerId
+	}
+	return ""
+}
+
+func (x *IdentityEvidenceResponse) GetBiscuit() []byte {
+	if x != nil {
+		return x.Biscuit
+	}
+	return nil
+}
+
+func (x *IdentityEvidenceResponse) GetBiscuitExpiresAt() int64 {
+	if x != nil {
+		return x.BiscuitExpiresAt
+	}
+	return 0
+}
+
+func (x *IdentityEvidenceResponse) GetControlPlaneUrl() string {
+	if x != nil {
+		return x.ControlPlaneUrl
+	}
+	return ""
+}
+
+func (x *IdentityEvidenceResponse) GetTrustedControlPlaneKeys() [][]byte {
+	if x != nil {
+		return x.TrustedControlPlaneKeys
+	}
+	return nil
+}
+
+func (x *IdentityEvidenceResponse) GetCheckedAt() int64 {
+	if x != nil {
+		return x.CheckedAt
+	}
+	return 0
+}
+
+type PeerEvidenceResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	PeerId        string                 `protobuf:"bytes,1,opt,name=peer_id,json=peerId,proto3" json:"peer_id,omitempty"`
+	Biscuit       []byte                 `protobuf:"bytes,2,opt,name=biscuit,proto3" json:"biscuit,omitempty"`
+	VerifyingKey  []byte                 `protobuf:"bytes,3,opt,name=verifying_key,json=verifyingKey,proto3" json:"verifying_key,omitempty"` // Ed25519 SPKI DER, member of the trusted set
+	Roles         []string               `protobuf:"bytes,4,rep,name=roles,proto3" json:"roles,omitempty"`
+	Labels        map[string]string      `protobuf:"bytes,5,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	Expiration    int64                  `protobuf:"varint,6,opt,name=expiration,proto3" json:"expiration,omitempty"`
+	RevocationIds []string               `protobuf:"bytes,7,rep,name=revocation_ids,json=revocationIds,proto3" json:"revocation_ids,omitempty"` // hex
+	CheckedAt     int64                  `protobuf:"varint,8,opt,name=checked_at,json=checkedAt,proto3" json:"checked_at,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PeerEvidenceResponse) Reset() {
+	*x = PeerEvidenceResponse{}
+	mi := &file_api_sam_proto_msgTypes[40]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PeerEvidenceResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PeerEvidenceResponse) ProtoMessage() {}
+
+func (x *PeerEvidenceResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_api_sam_proto_msgTypes[40]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PeerEvidenceResponse.ProtoReflect.Descriptor instead.
+func (*PeerEvidenceResponse) Descriptor() ([]byte, []int) {
+	return file_api_sam_proto_rawDescGZIP(), []int{40}
+}
+
+func (x *PeerEvidenceResponse) GetPeerId() string {
+	if x != nil {
+		return x.PeerId
+	}
+	return ""
+}
+
+func (x *PeerEvidenceResponse) GetBiscuit() []byte {
+	if x != nil {
+		return x.Biscuit
+	}
+	return nil
+}
+
+func (x *PeerEvidenceResponse) GetVerifyingKey() []byte {
+	if x != nil {
+		return x.VerifyingKey
+	}
+	return nil
+}
+
+func (x *PeerEvidenceResponse) GetRoles() []string {
+	if x != nil {
+		return x.Roles
+	}
+	return nil
+}
+
+func (x *PeerEvidenceResponse) GetLabels() map[string]string {
+	if x != nil {
+		return x.Labels
+	}
+	return nil
+}
+
+func (x *PeerEvidenceResponse) GetExpiration() int64 {
+	if x != nil {
+		return x.Expiration
+	}
+	return 0
+}
+
+func (x *PeerEvidenceResponse) GetRevocationIds() []string {
+	if x != nil {
+		return x.RevocationIds
+	}
+	return nil
+}
+
+func (x *PeerEvidenceResponse) GetCheckedAt() int64 {
+	if x != nil {
+		return x.CheckedAt
+	}
+	return 0
+}
+
 var File_api_sam_proto protoreflect.FileDescriptor
 
 const file_api_sam_proto_rawDesc = "" +
@@ -2836,7 +3020,30 @@ const file_api_sam_proto_rawDesc = "" +
 	"\x15credential_expires_at\x18\x04 \x01(\x03R\x13credentialExpiresAt\"X\n" +
 	"\x13AgentStatusResponse\x12+\n" +
 	"\x06agents\x18\x01 \x03(\v2\x13.sam.v1.AgentStatusR\x06agents\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error*\x94\x01\n" +
+	"\x05error\x18\x02 \x01(\tR\x05error\"\x83\x02\n" +
+	"\x18IdentityEvidenceResponse\x12\x17\n" +
+	"\apeer_id\x18\x01 \x01(\tR\x06peerId\x12\x18\n" +
+	"\abiscuit\x18\x02 \x01(\fR\abiscuit\x12,\n" +
+	"\x12biscuit_expires_at\x18\x03 \x01(\x03R\x10biscuitExpiresAt\x12*\n" +
+	"\x11control_plane_url\x18\x04 \x01(\tR\x0fcontrolPlaneUrl\x12;\n" +
+	"\x1atrusted_control_plane_keys\x18\x05 \x03(\fR\x17trustedControlPlaneKeys\x12\x1d\n" +
+	"\n" +
+	"checked_at\x18\x06 \x01(\x03R\tcheckedAt\"\xe7\x02\n" +
+	"\x14PeerEvidenceResponse\x12\x17\n" +
+	"\apeer_id\x18\x01 \x01(\tR\x06peerId\x12\x18\n" +
+	"\abiscuit\x18\x02 \x01(\fR\abiscuit\x12#\n" +
+	"\rverifying_key\x18\x03 \x01(\fR\fverifyingKey\x12\x14\n" +
+	"\x05roles\x18\x04 \x03(\tR\x05roles\x12@\n" +
+	"\x06labels\x18\x05 \x03(\v2(.sam.v1.PeerEvidenceResponse.LabelsEntryR\x06labels\x12\x1e\n" +
+	"\n" +
+	"expiration\x18\x06 \x01(\x03R\n" +
+	"expiration\x12%\n" +
+	"\x0erevocation_ids\x18\a \x03(\tR\rrevocationIds\x12\x1d\n" +
+	"\n" +
+	"checked_at\x18\b \x01(\x03R\tcheckedAt\x1a9\n" +
+	"\vLabelsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01*\x94\x01\n" +
 	"\x10EnrollmentStatus\x12!\n" +
 	"\x1dENROLLMENT_STATUS_UNSPECIFIED\x10\x00\x12\x1d\n" +
 	"\x19ENROLLMENT_STATUS_PENDING\x10\x01\x12\x1e\n" +
@@ -2860,7 +3067,7 @@ func file_api_sam_proto_rawDescGZIP() []byte {
 }
 
 var file_api_sam_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_api_sam_proto_msgTypes = make([]protoimpl.MessageInfo, 43)
+var file_api_sam_proto_msgTypes = make([]protoimpl.MessageInfo, 46)
 var file_api_sam_proto_goTypes = []any{
 	(EnrollmentStatus)(0),              // 0: sam.v1.EnrollmentStatus
 	(ServiceType)(0),                   // 1: sam.v1.ServiceType
@@ -2904,22 +3111,25 @@ var file_api_sam_proto_goTypes = []any{
 	(*AgentStatusRequest)(nil),         // 39: sam.v1.AgentStatusRequest
 	(*AgentStatus)(nil),                // 40: sam.v1.AgentStatus
 	(*AgentStatusResponse)(nil),        // 41: sam.v1.AgentStatusResponse
-	nil,                                // 42: sam.v1.EnrollRequest.LabelsEntry
-	nil,                                // 43: sam.v1.BootstrapEnrollRequest.LabelsEntry
-	nil,                                // 44: sam.v1.CommandBackend.EnvEntry
-	nil,                                // 45: sam.v1.ServiceAnnounce.LabelsEntry
+	(*IdentityEvidenceResponse)(nil),   // 42: sam.v1.IdentityEvidenceResponse
+	(*PeerEvidenceResponse)(nil),       // 43: sam.v1.PeerEvidenceResponse
+	nil,                                // 44: sam.v1.EnrollRequest.LabelsEntry
+	nil,                                // 45: sam.v1.BootstrapEnrollRequest.LabelsEntry
+	nil,                                // 46: sam.v1.CommandBackend.EnvEntry
+	nil,                                // 47: sam.v1.ServiceAnnounce.LabelsEntry
+	nil,                                // 48: sam.v1.PeerEvidenceResponse.LabelsEntry
 }
 var file_api_sam_proto_depIdxs = []int32{
 	2,  // 0: sam.v1.MeshEvent.type:type_name -> sam.v1.MeshEvent.Type
-	42, // 1: sam.v1.EnrollRequest.labels:type_name -> sam.v1.EnrollRequest.LabelsEntry
-	43, // 2: sam.v1.BootstrapEnrollRequest.labels:type_name -> sam.v1.BootstrapEnrollRequest.LabelsEntry
+	44, // 1: sam.v1.EnrollRequest.labels:type_name -> sam.v1.EnrollRequest.LabelsEntry
+	45, // 2: sam.v1.BootstrapEnrollRequest.labels:type_name -> sam.v1.BootstrapEnrollRequest.LabelsEntry
 	0,  // 3: sam.v1.BootstrapEnrollResponse.status:type_name -> sam.v1.EnrollmentStatus
 	1,  // 4: sam.v1.ServiceInfo.type:type_name -> sam.v1.ServiceType
-	44, // 5: sam.v1.CommandBackend.env:type_name -> sam.v1.CommandBackend.EnvEntry
+	46, // 5: sam.v1.CommandBackend.env:type_name -> sam.v1.CommandBackend.EnvEntry
 	10, // 6: sam.v1.RegisterServiceRequest.service:type_name -> sam.v1.ServiceInfo
 	11, // 7: sam.v1.RegisterServiceRequest.command:type_name -> sam.v1.CommandBackend
 	1,  // 8: sam.v1.ServiceAnnounce.type:type_name -> sam.v1.ServiceType
-	45, // 9: sam.v1.ServiceAnnounce.labels:type_name -> sam.v1.ServiceAnnounce.LabelsEntry
+	47, // 9: sam.v1.ServiceAnnounce.labels:type_name -> sam.v1.ServiceAnnounce.LabelsEntry
 	18, // 10: sam.v1.PolicyConfigGetResponse.roles:type_name -> sam.v1.PolicyRole
 	19, // 11: sam.v1.PolicyConfigGetResponse.bindings:type_name -> sam.v1.PolicyBinding
 	18, // 12: sam.v1.PolicyConfigUpdateRequest.roles:type_name -> sam.v1.PolicyRole
@@ -2931,11 +3141,12 @@ var file_api_sam_proto_depIdxs = []int32{
 	32, // 18: sam.v1.AgentAttachRequest.bundle:type_name -> sam.v1.AgentBundle
 	31, // 19: sam.v1.AgentStatus.ingress:type_name -> sam.v1.AgentIngress
 	40, // 20: sam.v1.AgentStatusResponse.agents:type_name -> sam.v1.AgentStatus
-	21, // [21:21] is the sub-list for method output_type
-	21, // [21:21] is the sub-list for method input_type
-	21, // [21:21] is the sub-list for extension type_name
-	21, // [21:21] is the sub-list for extension extendee
-	0,  // [0:21] is the sub-list for field type_name
+	48, // 21: sam.v1.PeerEvidenceResponse.labels:type_name -> sam.v1.PeerEvidenceResponse.LabelsEntry
+	22, // [22:22] is the sub-list for method output_type
+	22, // [22:22] is the sub-list for method input_type
+	22, // [22:22] is the sub-list for extension type_name
+	22, // [22:22] is the sub-list for extension extendee
+	0,  // [0:22] is the sub-list for field type_name
 }
 
 func init() { file_api_sam_proto_init() }
@@ -2953,7 +3164,7 @@ func file_api_sam_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_sam_proto_rawDesc), len(file_api_sam_proto_rawDesc)),
 			NumEnums:      3,
-			NumMessages:   43,
+			NumMessages:   46,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

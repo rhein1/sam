@@ -81,35 +81,24 @@ teardown() {
   mesh_start_node "2" "--log-level=debug"
   MESH_NETWORK=$OLD_NET
 
-  # Gate on MCP actually answering: get_mesh_info polls below go through it, and
-  # a not-yet-listening sidecar burns discovery budget on empty responses.
-  run mesh_wait_for_log "${MESH_PREFIX}-node-1" "SAM Node Online" 30
+  run mesh_wait_for_log "${MESH_PREFIX}-node-1" "PeerID:" 20
   [[ "$status" -eq 0 ]]
-  run mesh_wait_for_mcp_ready "1" 30
+  run mesh_wait_for_log "${MESH_PREFIX}-node-2" "PeerID:" 20
   [[ "$status" -eq 0 ]]
 
+  # Node 1 should eventually see 1 peer (node 2) besides the router
+  run mesh_wait_for_node_count "1" 1 30
+  [[ "$status" -eq 0 ]]
+
+  # Node 2 should eventually see 1 peer (node 1) besides the router
   OLD_NET=$MESH_NETWORK
   MESH_NETWORK=$MESH_NETWORK_2
-  run mesh_wait_for_log "${MESH_PREFIX}-node-2" "SAM Node Online" 30
-  [[ "$status" -eq 0 ]]
-  run mesh_wait_for_mcp_ready "2" 30
+  run mesh_wait_for_node_count "2" 1 30
   [[ "$status" -eq 0 ]]
   MESH_NETWORK=$OLD_NET
 
-  local node1_peer_id node2_peer_id
+  local node1_peer_id
   node1_peer_id=$(docker logs "${MESH_PREFIX}-node-1" 2>&1 | grep "PeerID:" | head -n 1 | awk '{print $2}' | tr -d '\r')
-  node2_peer_id=$(docker logs "${MESH_PREFIX}-node-2" 2>&1 | grep "PeerID:" | head -n 1 | awk '{print $2}' | tr -d '\r')
-
-  # Assert on the specific peer, not on set size: a relayed connection can leave
-  # extra entries in connected_peers, so "length - 1" is not a stable count.
-  run mesh_wait_for_peer_connection "1" "${node2_peer_id}" 60
-  [[ "$status" -eq 0 ]]
-
-  OLD_NET=$MESH_NETWORK
-  MESH_NETWORK=$MESH_NETWORK_2
-  run mesh_wait_for_peer_connection "2" "${node1_peer_id}" 60
-  [[ "$status" -eq 0 ]]
-  MESH_NETWORK=$OLD_NET
 
   # 1. Setup HTTP Service on Node 1 side (default network)
   docker run -d \

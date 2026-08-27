@@ -506,12 +506,8 @@ func (s *Server) HandleRegister(w http.ResponseWriter, r *http.Request) {
 	finalRoles := []string{req.RequestedRole}
 	finalRoles = append(finalRoles, customAccessRoles...)
 
-	// Mint token. A biscuit must never outlive the OIDC token that vouched
-	// for it, so its expiration is capped at whichever comes first.
-	biscuitExpiry := time.Now().Add(s.config.BiscuitTTL)
-	if token.Expiry.Before(biscuitExpiry) {
-		biscuitExpiry = token.Expiry
-	}
+	// Mint token
+	biscuitExpiry := time.Now().Add(api.BiscuitTokenTTL)
 	biscuitData, _, err := identity.MintBiscuitToken(privKey, claims, token, pID, biscuitExpiry, finalRoles, policyRoles, req.Labels)
 	if err != nil {
 		logger.Errorw("Biscuit minting failed", "peer_id", req.PeerId, "error", err)
@@ -566,7 +562,7 @@ func (s *Server) HandleRegister(w http.ResponseWriter, r *http.Request) {
 		BiscuitToken:          biscuitData,
 		ControlPlanePublicKey: pubKey,
 		RouterAddresses:       routerAddrs, // routers nodes multiaddresses
-		Expiration:            biscuitExpiry.Unix(),
+		Expiration:            token.Expiry.Unix(),
 	}
 
 	respData, err := proto.Marshal(resp)
@@ -626,10 +622,8 @@ func (s *Server) HandleRefresh(w http.ResponseWriter, r *http.Request) {
 		trustedKeys = append(trustedKeys, k.Public)
 	}
 
-	// Verify current biscuit signature and extract peer ID. Expiry is not
-	// enforced here: a node refreshes because its token lapsed. The session
-	// record and the signed challenge below are what bound this request.
-	pID, err := identity.VerifyExpiredAndExtractPeerID(trustedKeys, currentBiscuitBytes, s.config.BiscuitTimeout)
+	// Verify current biscuit signature and extract peer ID
+	pID, err := identity.VerifyAndExtractPeerID(trustedKeys, currentBiscuitBytes, s.config.BiscuitTimeout)
 	if err != nil {
 		logger.Warnw("Invalid biscuit presented for refresh", "error", err)
 		http.Error(w, "Invalid biscuit: "+err.Error(), http.StatusUnauthorized)
@@ -693,12 +687,7 @@ func (s *Server) HandleRefresh(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var biscuitBytes []byte
-	// No live OIDC token is presented on refresh, so the session record is what
-	// vouches for this node. The biscuit must not outlive it.
-	biscuitExpiry := time.Now().Add(s.config.BiscuitTTL)
-	if !nodeRecord.ExpiresAt.IsZero() && nodeRecord.ExpiresAt.Before(biscuitExpiry) {
-		biscuitExpiry = nodeRecord.ExpiresAt
-	}
+	biscuitExpiry := time.Now().Add(api.BiscuitTokenTTL)
 
 	if nodeRecord.EnrollmentType == "OIDC" {
 		var claims jwt.MapClaims
@@ -1205,7 +1194,7 @@ func (s *Server) HandleEnroll(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
 			return
 		}
-		biscuitBytes, err := identity.MintBootstrapBiscuitToken(privKey, pID, tokenRecord.Role, time.Now().Add(s.config.BiscuitTTL), policyRoles, req.Labels)
+		biscuitBytes, err := identity.MintBootstrapBiscuitToken(privKey, pID, tokenRecord.Role, time.Now().Add(api.BiscuitTokenTTL), policyRoles, req.Labels)
 		if err != nil {
 			logger.Errorf("Failed to mint bootstrap biscuit: %v", err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
@@ -1558,7 +1547,7 @@ func (s *Server) HandleAdminEnrollmentAction(w http.ResponseWriter, r *http.Requ
 		}
 		// Admin approval is the attestation of the operator-declared labels
 		// recorded on the pending request.
-		biscuitBytes, err := identity.MintBootstrapBiscuitToken(privKey, pID, tokenRecord.Role, time.Now().Add(s.config.BiscuitTTL), policyRoles, enrollReq.Labels)
+		biscuitBytes, err := identity.MintBootstrapBiscuitToken(privKey, pID, tokenRecord.Role, time.Now().Add(api.BiscuitTokenTTL), policyRoles, enrollReq.Labels)
 		if err != nil {
 			logger.Errorf("Failed to mint bootstrap biscuit: %v", err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
@@ -1683,9 +1672,9 @@ func (s *Server) buildApprovedBootstrapEnrollResponse(ctx context.Context, biscu
 		routerAddrs = append(routerAddrs, r.Addresses...)
 	}
 
-	expiration := time.Now().Add(s.config.BiscuitTTL).Unix()
+	expiration := time.Now().Add(api.BiscuitTokenTTL).Unix()
 	if resolvedAt != nil {
-		expiration = resolvedAt.Add(s.config.BiscuitTTL).Unix()
+		expiration = resolvedAt.Add(api.BiscuitTokenTTL).Unix()
 	}
 
 	return &api.BootstrapEnrollResponse{

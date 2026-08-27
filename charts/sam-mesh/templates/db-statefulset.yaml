@@ -16,18 +16,6 @@ spec:
       labels:
         app: {{ include "sam-mesh.fullname" . }}-db
     spec:
-      {{- with .Values.database.postgres.nodeSelector }}
-      nodeSelector:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- with .Values.database.postgres.tolerations }}
-      tolerations:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- with .Values.database.postgres.affinity }}
-      affinity:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
       containers:
       - name: postgres
         image: "{{ .Values.database.postgres.image.repository }}:{{ .Values.database.postgres.image.tag }}"
@@ -46,14 +34,6 @@ spec:
         - containerPort: 5432
           name: postgres
           protocol: TCP
-        readinessProbe:
-          exec:
-            command: ["pg_isready", "-U", {{ .Values.database.postgres.user | quote }}, "-d", {{ .Values.database.postgres.database | quote }}]
-          periodSeconds: 5
-        livenessProbe:
-          exec:
-            command: ["pg_isready", "-U", {{ .Values.database.postgres.user | quote }}, "-d", {{ .Values.database.postgres.database | quote }}]
-          periodSeconds: 15
         resources:
           {{- toYaml .Values.database.postgres.resources | nindent 10 }}
         volumeMounts:

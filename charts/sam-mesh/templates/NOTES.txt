@@ -31,13 +31,5 @@ valid identity is enrolled automatically without manual admin approval. Set
 it to false for production deployments where you want to review enrollments.
 {{- end }}
 
-{{- if and .Values.router.hostPort (gt (int .Values.router.replicaCount) 1) }}
-
-WARNING: router.hostPort={{ .Values.router.hostPort }} with replicaCount={{ .Values.router.replicaCount }}.
-Each router binds that port on its node, so at most one router runs per node.
-With fewer than {{ .Values.router.replicaCount }} schedulable nodes (after router.nodeSelector), the extra
-pods stay Pending with "node(s) didn't have free ports".
-{{- end }}
-
 See charts/sam-mesh/README.md for more details on configuring OIDC, TLS, and
 production values.

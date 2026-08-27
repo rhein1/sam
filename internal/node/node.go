@@ -116,27 +116,13 @@ type nodeRelayACL struct {
 }
 
 func (a *nodeRelayACL) AllowReserve(p peer.ID, addr multiaddr.Multiaddr) bool {
-	return a.node.isAdmitted(p)
+	_, ok := a.node.authPeers.Load(p)
+	return ok
 }
 
 func (a *nodeRelayACL) AllowConnect(src peer.ID, srcAddr multiaddr.Multiaddr, dest peer.ID) bool {
-	return a.node.isAdmitted(dest)
-}
-
-// isAdmitted reports whether a peer completed the auth handshake and its token
-// has not lapsed since. The handshake only proves the token was valid at that
-// instant, so without this the relay ACL would honour an admission forever.
-func (n *SamNode) isAdmitted(p peer.ID) bool {
-	v, ok := n.authPeers.Load(p)
-	if !ok {
-		return false
-	}
-	expiry, ok := v.(time.Time)
-	if !ok || !time.Now().Before(expiry) {
-		n.authPeers.Delete(p)
-		return false
-	}
-	return true
+	_, ok := a.node.authPeers.Load(dest)
+	return ok
 }
 
 type SamNode struct {
@@ -1211,9 +1197,7 @@ func (n *SamNode) handleBannedEvent(event *api.MeshEvent) {
 	if n.revokedPeers != nil {
 		n.revokedPeers.Add(event.PeerId, event.Timestamp)
 	}
-	// Drop any prior admission, otherwise the relay ACL keeps honouring it.
 	if p, err := peer.Decode(event.PeerId); err == nil {
-		n.authPeers.Delete(p)
 		if n.Host != nil {
 			_ = n.Host.Network().ClosePeer(p)
 		}
@@ -1405,13 +1389,6 @@ func (n *SamNode) HandleAuthHandshake(s network.Stream) {
 	}()
 	remotePeer := s.Conn().RemotePeer()
 
-	if n.revokedPeers != nil {
-		if _, revoked := n.revokedPeers.Get(remotePeer.String()); revoked {
-			logger.Warnf("[AuthN] Peer %s is revoked", remotePeer)
-			return
-		}
-	}
-
 	reader := msgio.NewVarintReaderSize(s, 1024*64)
 	msg, err := reader.ReadMsg()
 	if err != nil {
@@ -1426,7 +1403,7 @@ func (n *SamNode) HandleAuthHandshake(s network.Stream) {
 		return
 	}
 
-	b, expiry, err := n.verifyBiscuit(exchange.Biscuit, remotePeer)
+	b, err := n.verifyBiscuit(exchange.Biscuit, remotePeer)
 	if err != nil {
 		logger.Warnf("[AuthN] Authorization failed for %s: %v", remotePeer, err)
 		return
@@ -1442,7 +1419,7 @@ func (n *SamNode) HandleAuthHandshake(s network.Stream) {
 		return
 	}
 
-	n.authPeers.Store(remotePeer, expiry)
+	n.authPeers.Store(remotePeer, true)
 	logger.Infof("[AuthN] Successfully authenticated peer %s", remotePeer)
 
 	// Mutual response with our identity, mirroring the router handler, so
@@ -1454,10 +1431,10 @@ func (n *SamNode) HandleAuthHandshake(s network.Stream) {
 	}
 }
 
-func (n *SamNode) verifyBiscuit(biscuitData []byte, remotePeer peer.ID) (*biscuit.Biscuit, time.Time, error) {
+func (n *SamNode) verifyBiscuit(biscuitData []byte, remotePeer peer.ID) (*biscuit.Biscuit, error) {
 	b, err := biscuit.Unmarshal(biscuitData)
 	if err != nil {
-		return nil, time.Time{}, fmt.Errorf("malformed biscuit: %w", err)
+		return nil, fmt.Errorf("malformed biscuit: %w", err)
 	}
 
 	n.keysMu.RLock()
@@ -1475,24 +1452,19 @@ func (n *SamNode) verifyBiscuit(biscuitData []byte, remotePeer peer.ID) (*biscui
 			continue
 		}
 
-		identity.EnforceExpiration(authorizer)
 		authorizer.AddPolicy(api.AllowIfTruePolicy)
 
 		if err := authorizer.Authorize(); err == nil {
-			expiry, err := identity.ExpirationOf(authorizer)
-			if err != nil {
-				return nil, time.Time{}, err
-			}
-			return b, expiry, nil
+			return b, nil
 		} else {
 			lastErr = fmt.Errorf("authorize error: %w", err)
 		}
 	}
 
 	if lastErr != nil {
-		return nil, time.Time{}, fmt.Errorf("no valid key found (last error: %v)", lastErr)
+		return nil, fmt.Errorf("no valid key found (last error: %v)", lastErr)
 	}
-	return nil, time.Time{}, fmt.Errorf("no valid key found")
+	return nil, fmt.Errorf("no valid key found")
 }
 
 func (n *SamNode) RegisterService(ctx context.Context, req *api.RegisterServiceRequest) error {

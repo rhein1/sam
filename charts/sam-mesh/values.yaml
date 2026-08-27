@@ -2,34 +2,10 @@ global:
   imageTag: local
   imagePullPolicy: IfNotPresent
 
-# One Gateway fronting the mesh: the control plane's enrollment surface plus the console
-# under gateway.consolePath.
-gateway:
-  enabled: false
-  # Required when enabled. No default: the GatewayClass is provider-specific, e.g.
-  # cloud-provider-kind in kind, gke-l7-global-external-managed on GKE.
-  className: ""
-  # Routes the control plane's /admin API. Dev only.
-  adminRoute: false
-  # External prefix the console is served under. Empty leaves the console unrouted.
-  consolePath: /console
-  listeners:
-  - name: http
-    protocol: HTTP
-    port: 80
-    allowedRoutes:
-      namespaces:
-        from: Same
-  hostnames: []
-  addresses: []
-  annotations: {}
-
 controlPlane:
   replicaCount: 2
   image:
     repository: sam-control-plane
-    # Overrides global.imageTag for this image only.
-    tag: ""
   logLevel: info
   # Leave empty to auto-generate a random admin token on first install (kept
   # stable across upgrades). Set explicitly (e.g. via --set) to pin a known value.
@@ -38,24 +14,8 @@ controlPlane:
   # Only skips TLS verification for the OIDC issuer; leave false unless
   # pointing at a local/dev issuer without a valid certificate.
   insecureSkipTlsVerify: false
-  # Required: the chart bundles no identity provider. Point it at your OIDC issuer
-  # (comma-separated for more than one); the control plane refuses to start without one.
-  oidcIssuer: ""
+  oidcIssuer: "http://sam-mesh-dex:5556/dex"
   allowedAudiences: "sam-mesh-audience,sam-control-plane-audience"
-  nodeSelector: {}
-  tolerations: []
-  affinity: {}
-  podSecurityContext:
-    runAsNonRoot: true
-    # Dockerfiles say "USER nonroot" by name; runAsNonRoot needs the numeric uid.
-    runAsUser: 65532
-    runAsGroup: 65532
-    seccompProfile:
-      type: RuntimeDefault
-  securityContext:
-    allowPrivilegeEscalation: false
-    capabilities:
-      drop: ["ALL"]
   resources:
     requests:
       cpu: 100m
@@ -83,9 +43,6 @@ database:
     port: 5432
     sslmode: disable
     storageSize: 1Gi
-    nodeSelector: {}
-    tolerations: []
-    affinity: {}
     resources:
       requests:
         cpu: 100m
@@ -98,37 +55,12 @@ router:
   enabled: true
   replicaCount: 1
   podSecurityContext:
-    runAsNonRoot: true
-    # Dockerfiles say "USER nonroot" by name; runAsNonRoot needs the numeric uid.
-    runAsUser: 65532
-    runAsGroup: 65532
-    seccompProfile:
-      type: RuntimeDefault
     fsGroup: 65532
     fsGroupChangePolicy: "OnRootMismatch"
-  securityContext:
-    allowPrivilegeEscalation: false
-    capabilities:
-      drop: ["ALL"]
   image:
     repository: sam-router
-    # Overrides global.imageTag for this image only.
-    tag: ""
   useOidcToken: false
   logLevel: info
-  # Binds 4501 TCP+UDP on the router's own node and announces /ip4/<node IP>/... for both
-  # transports. One router per node.
-  hostPort: null
-  nodeSelector: {}
-  tolerations: []
-  affinity: {}
-  # Overrides the announced multiaddrs; derived from hostPort when left empty.
-  externalAddrs: []
-  allowLoopback: false
-  # PVC for /data/router.key, so the libp2p peer ID survives rescheduling.
-  storageSize: 1Gi
-  # PVC StorageClass; cluster default when null.
-  storageClass: null
   resources:
     requests:
       cpu: 100m
@@ -139,28 +71,13 @@ router:
   service:
     type: ClusterIP
     port: 4501
+    nodePort: null
 
 console:
   enabled: true
   replicaCount: 1
   image:
     repository: sam-console
-    # Overrides global.imageTag for this image only.
-    tag: ""
-  nodeSelector: {}
-  tolerations: []
-  affinity: {}
-  podSecurityContext:
-    runAsNonRoot: true
-    # Dockerfiles say "USER nonroot" by name; runAsNonRoot needs the numeric uid.
-    runAsUser: 65532
-    runAsGroup: 65532
-    seccompProfile:
-      type: RuntimeDefault
-  securityContext:
-    allowPrivilegeEscalation: false
-    capabilities:
-      drop: ["ALL"]
   resources:
     requests:
       cpu: 50m
@@ -173,7 +90,20 @@ console:
     port: 8081
     nodePort: null
 
+dex:
+  enabled: false
+  nodePort: 30556
+  image:
+    repository: dexidp/dex
+    tag: v2.39.0
+  google:
+    clientId: ""
+    clientSecret: ""
+  github:
+    clientId: ""
+    clientSecret: ""
+  cliOAuthSecret: ""
+
 bootstrap:
   bindings: []
-  # Services sam:role:node may call
-  nodeServices: ["*"]
+

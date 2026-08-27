@@ -576,48 +576,6 @@ func TestVerifyAndExtractPeerID_MultipleTrustedKeys(t *testing.T) {
 	}
 }
 
-// TestExtractPeerIDExpiry pins that adding the expiration check still rejects an
-// expired token even though neither variant adds a policy, i.e. that a failed
-// check outranks ErrNoMatchingPolicy.
-func TestExtractPeerIDExpiry(t *testing.T) {
-	pub, priv, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-	privNode, _, err := crypto.GenerateKeyPair(crypto.Ed25519, -1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	dummyPeer, err := peer.IDFromPrivateKey(privNode)
-	if err != nil {
-		t.Fatal(err)
-	}
-	trustedKeys := []ed25519.PublicKey{pub}
-
-	fresh, err := MintBootstrapBiscuitToken(priv, dummyPeer, api.RoleNode, time.Now().Add(time.Hour), nil, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	expired, err := MintBootstrapBiscuitToken(priv, dummyPeer, api.RoleNode, time.Now().Add(-time.Hour), nil, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if _, err := VerifyAndExtractPeerID(trustedKeys, fresh, 5*time.Second); err != nil {
-		t.Errorf("unexpired token rejected: %v", err)
-	}
-	if _, err := VerifyAndExtractPeerID(trustedKeys, expired, 5*time.Second); err == nil {
-		t.Error("expired token accepted by the expiry-enforcing variant")
-	}
-
-	// The refresh flow depends on the exempt variant staying permissive.
-	if got, err := VerifyExpiredAndExtractPeerID(trustedKeys, expired, 5*time.Second); err != nil {
-		t.Errorf("expired token rejected by the refresh variant: %v", err)
-	} else if got != dummyPeer {
-		t.Errorf("got peer %s, want %s", got, dummyPeer)
-	}
-}
-
 func TestVerifyBiscuitRole_TimeoutIsHonored(t *testing.T) {
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {

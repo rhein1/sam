@@ -48,12 +48,6 @@ func buildAndSaveBiscuit(node *SamNode, rootPriv ed25519.PrivateKey) error {
 	}}); err != nil {
 		return err
 	}
-	if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
-		Name: api.FactExpiration,
-		IDs:  []biscuit.Term{biscuit.Date(time.Now().Add(time.Hour))},
-	}}); err != nil {
-		return err
-	}
 	bisc, err := builder.Build()
 	if err != nil {
 		return err
@@ -459,12 +453,6 @@ func buildAndSaveCustomBiscuit(node *SamNode, rootPriv ed25519.PrivateKey, allow
 		}}); err != nil {
 			return err
 		}
-	}
-	if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
-		Name: api.FactExpiration,
-		IDs:  []biscuit.Term{biscuit.Date(time.Now().Add(time.Hour))},
-	}}); err != nil {
-		return err
 	}
 	bisc, err := builder.Build()
 	if err != nil {
