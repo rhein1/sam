@@ -62,6 +62,17 @@ func StartSidecarServer(node *SamNode, addr, socketPath, token, certFile, keyFil
 		handleDiscoverService(node, w, r)
 	}))))
 
+	// Identity evidence is local owner/control-plane material, not an agent tool.
+	// Require a channel that authenticates the sidecar back to the caller: the
+	// filesystem-protected Unix socket, or verified mTLS when TCP is unavoidable.
+	mux.Handle("/sam/identity", withAuth(token, true, requireIdentityEvidenceTransport(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handleIdentityEvidence(node, w, r)
+	}))))
+	mux.Handle("/sam/identity/", withAuth(token, true, requireIdentityEvidenceTransport(http.HandlerFunc(handleIdentityEvidenceNotFound))))
+	mux.Handle("/sam/peer/", withAuth(token, true, requireIdentityEvidenceTransport(withMeshConnection(node, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handlePeerEvidence(node, w, r)
+	})))))
+
 	// Mount Egress Proxy. allowAuthorizationFallback=false is required here: this
 	// handler forwards Authorization to the destination service, so it must never
 	// also accept it as the local gate credential (would leak the sidecar token off-node).

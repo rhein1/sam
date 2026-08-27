@@ -123,42 +123,65 @@ func (n *SamNode) checkPeerLabels(providerBiscuit []byte, peerID peer.ID, requir
 // fetchPeerBiscuit obtains the peer's control-plane-minted identity via the
 // mutual auth handshake on AuthProtocolID, authenticating with our own.
 func (n *SamNode) fetchPeerBiscuit(ctx context.Context, peerID peer.ID) ([]byte, error) {
+	observation, err := n.fetchPeerBiscuitEvidence(ctx, peerID)
+	if err != nil {
+		return nil, err
+	}
+	return observation.Biscuit, nil
+}
+
+type peerBiscuitObservation struct {
+	Biscuit        []byte
+	ConnectionPeer peer.ID
+}
+
+// fetchPeerBiscuitEvidence is the uncached form used by the local evidence API.
+// It preserves the PeerID authenticated by the libp2p stream separately from
+// the requested target so callers can fail closed on any binding mismatch.
+func (n *SamNode) fetchPeerBiscuitEvidence(ctx context.Context, peerID peer.ID) (peerBiscuitObservation, error) {
 	ourBiscuit := n.GetIdentity()
 	if ourBiscuit == nil {
-		return nil, fmt.Errorf("missing node identity")
+		return peerBiscuitObservation{}, fmt.Errorf("missing node identity")
 	}
 
 	dialCtx, cancel := context.WithTimeout(ctx, labelGateDialTimeout)
 	defer cancel()
 	s, err := n.Host.NewStream(dialCtx, peerID, api.AuthProtocolID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open auth stream: %w", err)
+		return peerBiscuitObservation{}, fmt.Errorf("failed to open auth stream: %w", err)
 	}
 	defer func() { _ = s.Close() }()
 	_ = s.SetDeadline(time.Now().Add(labelGateDialTimeout))
+	connectionPeer := s.Conn().RemotePeer()
+	if connectionPeer != peerID {
+		return peerBiscuitObservation{}, fmt.Errorf("authenticated connection peer %s does not match requested peer %s", connectionPeer, peerID)
+	}
 
 	authBytes, err := proto.Marshal(&api.AuthFrame{Biscuit: ourBiscuit})
 	if err != nil {
-		return nil, fmt.Errorf("marshal auth frame: %w", err)
+		return peerBiscuitObservation{}, fmt.Errorf("marshal auth frame: %w", err)
 	}
 	writer := msgio.NewVarintWriter(s)
 	if err := writer.WriteMsg(authBytes); err != nil {
-		return nil, fmt.Errorf("write auth frame: %w", err)
+		return peerBiscuitObservation{}, fmt.Errorf("write auth frame: %w", err)
 	}
 
 	reader := msgio.NewVarintReaderSize(s, 1024*64)
 	msg, err := reader.ReadMsg()
 	if err != nil {
-		return nil, fmt.Errorf("read auth response (peer may predate mutual auth): %w", err)
+		return peerBiscuitObservation{}, fmt.Errorf("read auth response (peer may predate mutual auth): %w", err)
 	}
 	defer reader.ReleaseMsg(msg)
 
 	var resp api.AuthResponse
 	if err := proto.Unmarshal(msg, &resp); err != nil {
-		return nil, fmt.Errorf("invalid auth response: %w", err)
+		return peerBiscuitObservation{}, fmt.Errorf("invalid auth response: %w", err)
 	}
 	if !resp.Success {
-		return nil, fmt.Errorf("auth rejected: %s", resp.Error)
+		return peerBiscuitObservation{}, fmt.Errorf("auth rejected: %s", resp.Error)
 	}
-	return resp.Biscuit, nil
+	return peerBiscuitObservation{
+		Biscuit:        resp.Biscuit,
+		ConnectionPeer: connectionPeer,
+	}, nil
 }

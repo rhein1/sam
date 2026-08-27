@@ -67,6 +67,8 @@ func classifyRoute(path string) string {
 	switch {
 	case path == "/healthz", path == "/readyz", path == "/metrics":
 		return "health"
+	case path == "/sam/identity", strings.HasPrefix(path, "/sam/identity/"), strings.HasPrefix(path, "/sam/peer/"):
+		return "identity-evidence"
 	case strings.HasPrefix(path, "/sam/service/"):
 		return "service-registry"
 	case strings.HasPrefix(path, "/sam/"):
