@@ -105,7 +105,7 @@ func (n *SamNode) stillTrustsKey(selected trustedKeySnapshot) bool {
 func requireIdentityEvidenceTransport(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !fromLocalSocket(r) && (r.TLS == nil || len(r.TLS.VerifiedChains) == 0) {
-			writeEvidenceError(w, http.StatusForbidden, "sam_evidence_strong_transport_required")
+			writeEvidenceError(w, http.StatusForbidden, "Strong transport required")
 			return
 		}
 		next.ServeHTTP(w, r)
@@ -116,7 +116,7 @@ func writeEvidenceProtoJSON(w http.ResponseWriter, status int, value proto.Messa
 	body, err := protojson.Marshal(value)
 	if err != nil {
 		logger.Errorf("[IdentityEvidence] Failed to encode response: %v", err)
-		writeEvidenceError(w, http.StatusInternalServerError, "sam_evidence_encoding_failed")
+		writeEvidenceError(w, http.StatusInternalServerError, "Failed to encode response")
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -128,21 +128,25 @@ func writeEvidenceProtoJSON(w http.ResponseWriter, status int, value proto.Messa
 	}
 }
 
-func writeEvidenceError(w http.ResponseWriter, status int, code string) {
+func writeEvidenceError(w http.ResponseWriter, status int, message string) {
 	w.Header().Set("Cache-Control", "no-store")
-	http.Error(w, code, status)
+	http.Error(w, message, status)
+}
+
+func handleIdentityEvidenceNotFound(w http.ResponseWriter, _ *http.Request) {
+	writeEvidenceError(w, http.StatusNotFound, "Not found")
 }
 
 func handleIdentityEvidence(n *SamNode, w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.Header().Set("Allow", http.MethodGet)
-		writeEvidenceError(w, http.StatusMethodNotAllowed, "sam_evidence_method_not_allowed")
+		writeEvidenceError(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
 	response, err := n.buildIdentityEvidence(time.Now().UTC())
 	if err != nil {
 		logger.Warnf("[IdentityEvidence] Local identity unavailable: %v", err)
-		writeEvidenceError(w, http.StatusServiceUnavailable, "sam_identity_evidence_unavailable")
+		writeEvidenceError(w, http.StatusServiceUnavailable, "Identity evidence unavailable")
 		return
 	}
 	writeEvidenceProtoJSON(w, http.StatusOK, response)
@@ -151,36 +155,36 @@ func handleIdentityEvidence(n *SamNode, w http.ResponseWriter, r *http.Request) 
 func handlePeerEvidence(n *SamNode, w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.Header().Set("Allow", http.MethodGet)
-		writeEvidenceError(w, http.StatusMethodNotAllowed, "sam_evidence_method_not_allowed")
+		writeEvidenceError(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
 	const prefix = "/sam/peer/"
 	remainder := strings.TrimPrefix(r.URL.Path, prefix)
 	parts := strings.Split(remainder, "/")
 	if len(parts) != 2 || parts[0] == "" || parts[1] != "evidence" {
-		writeEvidenceError(w, http.StatusNotFound, "sam_peer_evidence_not_found")
+		writeEvidenceError(w, http.StatusNotFound, "Not found")
 		return
 	}
 	requestedPeer, err := peer.Decode(parts[0])
 	if err != nil || requestedPeer.String() != parts[0] {
-		writeEvidenceError(w, http.StatusBadRequest, "sam_peer_id_invalid")
+		writeEvidenceError(w, http.StatusBadRequest, "Invalid peer ID")
 		return
 	}
 	if n.peerIsRevoked(requestedPeer) {
-		writeEvidenceError(w, http.StatusForbidden, "sam_peer_revoked")
+		writeEvidenceError(w, http.StatusForbidden, "Peer is revoked")
 		return
 	}
 
 	observation, err := n.fetchPeerBiscuitEvidence(r.Context(), requestedPeer)
 	if err != nil {
 		logger.Warnf("[IdentityEvidence] Peer evidence fetch failed for %s: %v", requestedPeer, err)
-		writeEvidenceError(w, http.StatusBadGateway, "sam_peer_evidence_fetch_failed")
+		writeEvidenceError(w, http.StatusBadGateway, "Failed to fetch peer evidence")
 		return
 	}
 	response, err := n.buildPeerEvidence(requestedPeer, observation, time.Now().UTC())
 	if err != nil {
 		logger.Warnf("[IdentityEvidence] Peer evidence verification failed for %s: %v", requestedPeer, err)
-		writeEvidenceError(w, http.StatusUnprocessableEntity, "sam_peer_evidence_unverifiable")
+		writeEvidenceError(w, http.StatusUnprocessableEntity, "Peer evidence is unverifiable")
 		return
 	}
 	writeEvidenceProtoJSON(w, http.StatusOK, response)
