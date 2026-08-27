@@ -68,6 +68,7 @@ func StartSidecarServer(node *SamNode, addr, socketPath, token, certFile, keyFil
 	mux.Handle("/sam/identity", withAuth(token, true, requireIdentityEvidenceTransport(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handleIdentityEvidence(node, w, r)
 	}))))
+	mux.Handle("/sam/identity/", withAuth(token, true, requireIdentityEvidenceTransport(http.HandlerFunc(handleIdentityEvidenceNotFound))))
 	mux.Handle("/sam/peer/", withAuth(token, true, requireIdentityEvidenceTransport(withMeshConnection(node, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handlePeerEvidence(node, w, r)
 	})))))
