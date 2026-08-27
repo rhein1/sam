@@ -186,6 +186,16 @@ func handlePeerEvidence(n *SamNode, w http.ResponseWriter, r *http.Request) {
 	writeEvidenceProtoJSON(w, http.StatusOK, response)
 }
 
+func trustedControlPlaneKeysUnavailable(err error, snapshots []trustedKeySnapshot) error {
+	if err != nil {
+		return fmt.Errorf("trusted control-plane keys unavailable: %w", err)
+	}
+	if len(snapshots) == 0 {
+		return fmt.Errorf("trusted control-plane keys unavailable")
+	}
+	return nil
+}
+
 func (n *SamNode) buildIdentityEvidence(checkedAt time.Time) (*api.IdentityEvidenceResponse, error) {
 	if n == nil || n.Host == nil || n.Store == nil {
 		return nil, fmt.Errorf("node identity store is unavailable")
@@ -195,8 +205,8 @@ func (n *SamNode) buildIdentityEvidence(checkedAt time.Time) (*api.IdentityEvide
 		return nil, fmt.Errorf("node is not enrolled")
 	}
 	snapshots, err := n.trustedKeySnapshot()
-	if err != nil || len(snapshots) == 0 {
-		return nil, fmt.Errorf("trusted control-plane keys unavailable: %w", err)
+	if unavailable := trustedControlPlaneKeysUnavailable(err, snapshots); unavailable != nil {
+		return nil, unavailable
 	}
 	b, selectedKey, err := identity.VerifyBiscuitAndGetKey(biscuitBytes, n.Host.ID(), keysFromSnapshot(snapshots), n.BiscuitTimeout)
 	if err != nil {
@@ -236,8 +246,8 @@ func (n *SamNode) buildPeerEvidence(requested peer.ID, observation peerBiscuitOb
 		return nil, fmt.Errorf("requested and connection PeerIDs differ")
 	}
 	snapshots, err := n.trustedKeySnapshot()
-	if err != nil || len(snapshots) == 0 {
-		return nil, fmt.Errorf("trusted control-plane keys unavailable: %w", err)
+	if unavailable := trustedControlPlaneKeysUnavailable(err, snapshots); unavailable != nil {
+		return nil, unavailable
 	}
 	b, selectedKey, err := identity.VerifyBiscuitAndGetKey(observation.Biscuit, observation.ConnectionPeer, keysFromSnapshot(snapshots), n.BiscuitTimeout)
 	if err != nil {
@@ -370,10 +380,13 @@ func queryLabelFacts(authorizer biscuit.Authorizer) (map[string]string, error) {
 
 func queryExpiration(authorizer biscuit.Authorizer) (time.Time, error) {
 	facts, err := authorizer.Query(biscuit.Rule{
-		Head: biscuit.Predicate{Name: "q", IDs: []biscuit.Term{biscuit.Variable("v")}},
-		Body: []biscuit.Predicate{{Name: api.FactExpiration, IDs: []biscuit.Term{biscuit.Variable("v")}}},
+		Head: biscuit.Predicate{Name: "q", IDs: []biscuit.Term{biscuit.Variable("t")}},
+		Body: []biscuit.Predicate{{Name: api.FactExpiration, IDs: []biscuit.Term{biscuit.Variable("t")}}},
 	})
-	if err != nil || len(facts) != 1 || len(facts[0].IDs) != 1 {
+	if err != nil {
+		return time.Time{}, err
+	}
+	if len(facts) != 1 || len(facts[0].IDs) != 1 {
 		return time.Time{}, fmt.Errorf("expected exactly one expiration fact")
 	}
 	expiration, ok := facts[0].IDs[0].(biscuit.Date)
